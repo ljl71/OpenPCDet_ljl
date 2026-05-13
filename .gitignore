@@ -1,17 +1,52 @@
-**__pycache__**
-**build**
-**egg-info**
-**dist**
-data/
-*.pyc
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environments and IDE files
+.env
+.venv/
 venv/
-*.idea/
+env/
+.idea/
+.vscode/
+.history/
+
+# Build and generated package files
+build/
+dist/
+*.egg-info/
+pcdet/version.py
 *.so
-*.yaml
-*.sh
+*.o
+*.dll
+*.dylib
+
+# Datasets, checkpoints, predictions, and logs
+data/
+output/
+checkpoints/
+tools/data/
+tools/inference/ckpt/
+tools/inference/pointcloud/
+tools/inference/test_pcFile/
+tools/inference/dataset_demo/
 *.pth
 *.pkl
-*.zip
 *.bin
-output
-version.py
+*.pcd
+*.zip
+*.tar
+*.tar.gz
+*.log
+logfile
+*终端记录
+平台配置文件
+
+# Crash dumps / accidental large binaries
+core
+tools/core
+tools/inference/core

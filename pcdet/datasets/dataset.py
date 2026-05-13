@@ -28,8 +28,8 @@ class DatasetTemplate(torch_data.Dataset):
             point_cloud_range=self.point_cloud_range
         )
         self.data_augmentor = DataAugmentor(
-            self.root_path, self.dataset_cfg.DATA_AUGMENTOR, self.class_names, logger=self.logger
-        ) if self.training else None
+           self.root_path, self.dataset_cfg.DATA_AUGMENTOR, self.class_names,
+            logger=self.logger) if self.training else None
         self.data_processor = DataProcessor(
             self.dataset_cfg.DATA_PROCESSOR, point_cloud_range=self.point_cloud_range,
             training=self.training, num_point_features=self.point_feature_encoder.num_point_features
@@ -130,6 +130,30 @@ class DatasetTemplate(torch_data.Dataset):
         """
         raise NotImplementedError
 
+    def set_lidar_aug_matrix(self, data_dict):
+        """
+            Get lidar augment matrix (4 x 4), which are used to recover orig point coordinates.
+        """
+        lidar_aug_matrix = np.eye(4)
+        if 'flip_y' in data_dict.keys():
+            flip_x = data_dict['flip_x']
+            flip_y = data_dict['flip_y']
+            if flip_x:
+                lidar_aug_matrix[:3,:3] = np.array([[1, 0, 0], [0, -1, 0], [0, 0, 1]]) @ lidar_aug_matrix[:3,:3]
+            if flip_y:
+                lidar_aug_matrix[:3,:3] = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, 1]]) @ lidar_aug_matrix[:3,:3]
+        if 'noise_rot' in data_dict.keys():
+            noise_rot = data_dict['noise_rot']
+            lidar_aug_matrix[:3,:3] = common_utils.angle2matrix(torch.tensor(noise_rot)) @ lidar_aug_matrix[:3,:3]
+        if 'noise_scale' in data_dict.keys():
+            noise_scale = data_dict['noise_scale']
+            lidar_aug_matrix[:3,:3] *= noise_scale
+        if 'noise_translate' in data_dict.keys():
+            noise_translate = data_dict['noise_translate']
+            lidar_aug_matrix[:3,3:4] = noise_translate.T
+        data_dict['lidar_aug_matrix'] = lidar_aug_matrix
+        return data_dict
+    
     def prepare_data(self, data_dict):
         """
         Args:
@@ -199,13 +223,19 @@ class DatasetTemplate(torch_data.Dataset):
                 data_dict[key].append(val)
         batch_size = len(batch_list)
         ret = {}
+        batch_size_ratio = 1
 
         for key, val in data_dict.items():
             try:
                 if key in ['voxels', 'voxel_num_points']:
+                    if isinstance(val[0], list):
+                        batch_size_ratio = len(val[0])
+                        val = [i for item in val for i in item]
                     ret[key] = np.concatenate(val, axis=0)
                 elif key in ['points', 'voxel_coords']:
                     coors = []
+                    if isinstance(val[0], list):
+                        val =  [i for item in val for i in item]
                     for i, coor in enumerate(val):
                         coor_pad = np.pad(coor, ((0, 0), (1, 0)), mode='constant', constant_values=i)
                         coors.append(coor_pad)
@@ -281,11 +311,13 @@ class DatasetTemplate(torch_data.Dataset):
                                 constant_values=pad_value)
                         points.append(points_pad)
                     ret[key] = np.stack(points, axis=0)
+                elif key in ['camera_imgs']:
+                    ret[key] = torch.stack([torch.stack(imgs,dim=0) for imgs in val],dim=0)
                 else:
                     ret[key] = np.stack(val, axis=0)
             except:
                 print('Error in collate_batch: key=%s' % key)
                 raise TypeError
 
-        ret['batch_size'] = batch_size
+        ret['batch_size'] = batch_size * batch_size_ratio
         return ret

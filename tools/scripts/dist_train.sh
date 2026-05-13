@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 set -x
-NGPUS=$1
+NGPUS=$4
 PY_ARGS=${@:2}
 
 while true

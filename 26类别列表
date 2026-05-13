@@ -1,0 +1,65 @@
+[
+'human.pedestrian.adult',
+'human.pedestrian.child',
+'human.pedestrian.wheelchair',
+'human.pedestrian.stroller',
+'human.pedestrian.personal_mobility',
+'vehicle.car',
+'vehicle.bus.bendy',
+'vehicle.bus.rigid',
+'vehicle.truck',
+'vehicle.construction',
+'vehicle.emergency.ambulance',
+'vehicle.emergency.police',
+'vehicle.trailer',
+'movable_object.barrier',
+'movable_object.trafficcone',
+'movable_object.pushable_pullable',
+'movable_object.debris',
+'vehicle.emergency.other',
+'vehicle.motorcycle',
+'vehicle.bicycle',
+'group.human.pedestrian',
+'group.vehicle.bicycle',
+'other',
+'animal',
+'vehicle.tricycle',
+'bicycle'
+]
+
+
+map_name_from_general_to_detection = {
+    'human.pedestrian.adult': 'human_pedestrian_adult',
+    'human.pedestrian.child': 'human_pedestrian_child',
+    'human.pedestrian.wheelchair': 'human_pedestrian_wheelchair',
+    'human.pedestrian.stroller': 'human_pedestrian_stroller',
+    'human.pedestrian.personal_mobility': 'human_pedestrian_personal_mobility',
+
+    'vehicle.car': 'vehicle_car',
+    'vehicle.bus.bendy': 'vehicle_bus_bendy',
+    'vehicle.bus.rigid': 'vehicle_bus_rigid',
+    'vehicle.truck': 'vehicle_truck',
+    'vehicle.construction': 'vehicle_construction',
+    'vehicle.emergency.ambulance': 'vehicle_emergency_ambulance',
+    'vehicle.emergency.police': 'vehicle_emergency_police',
+    'vehicle.trailer': 'vehicle_trailer',
+    'vehicle.emergency.other': 'vehicle_emergency_other',
+
+    'vehicle.motorcycle': 'vehicle_motorcycle',
+    'vehicle.bicycle': 'vehicle_bicycle',
+    'vehicle.tricycle': 'vehicle_tricycle',
+
+    'movable_object.barrier': 'movable_object_barrier',
+    'movable_object.trafficcone': 'movable_object_trafficcone',
+    'movable_object.pushable_pullable': 'movable_object_pushable_pullable',
+    'movable_object.debris': 'movable_object_debris',
+
+    'group.human.pedestrian': 'group_human_pedestrian',
+    'group.vehicle.bicycle': 'group_vehicle_bicycle',
+
+    'animal': 'animal',
+    'other': 'other',
+
+    'bicycle': 'bicycle'
+}
+

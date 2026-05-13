@@ -11,16 +11,22 @@ from .nuscenes.nuscenes_dataset import NuScenesDataset
 from .waymo.waymo_dataset import WaymoDataset
 from .pandaset.pandaset_dataset import PandasetDataset
 from .lyft.lyft_dataset import LyftDataset
-from .custom.custom_dataset import CustomDataset
+from .once.once_dataset import ONCEDataset
+from .argo2.argo2_dataset import Argo2Dataset
+from .waymo.molar_dataset import molarDataset
+from .company_nuscenes.company_nuscenes_dataset import CompanyNuScenesDataset
 
 __all__ = {
     'DatasetTemplate': DatasetTemplate,
     'KittiDataset': KittiDataset,
     'NuScenesDataset': NuScenesDataset,
+    'CompanyNuScenesDataset': CompanyNuScenesDataset,
     'WaymoDataset': WaymoDataset,
     'PandasetDataset': PandasetDataset,
     'LyftDataset': LyftDataset,
-    'CustomDataset': CustomDataset
+    'molarDataset': molarDataset,
+    'ONCEDataset': ONCEDataset,
+    'Argo2Dataset': Argo2Dataset
 }
 
 
@@ -58,6 +64,68 @@ def build_dataloader(dataset_cfg, class_names, batch_size, dist, root_path=None,
         logger=logger,
     )
 
+    if merge_all_iters_to_one_epoch:
+        assert hasattr(dataset, 'merge_all_iters_to_one_epoch')
+        dataset.merge_all_iters_to_one_epoch(merge=True, epochs=total_epochs)
+
+    if dist:
+        if training:
+            sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+        else:
+            rank, world_size = common_utils.get_dist_info()
+            sampler = DistributedSampler(dataset, world_size, rank, shuffle=False)
+    else:
+        sampler = None
+    dataloader = DataLoader(
+        dataset, batch_size=batch_size, pin_memory=True, num_workers=workers,
+        shuffle=(sampler is None) and training, collate_fn=dataset.collate_batch,
+        drop_last=False, sampler=sampler, timeout=0, worker_init_fn=partial(common_utils.worker_init_fn, seed=seed)
+    )
+
+    return dataset, dataloader, sampler
+
+def build_molar_dataloader(dataset_cfg, class_names, batch_size, dist,data_file_list , root_path=None, workers=0, seed=None,
+                     logger=None, training=True, merge_all_iters_to_one_epoch=False, total_epochs=0):
+
+    dataset = __all__[dataset_cfg.DATASET](
+        dataset_cfg=dataset_cfg,
+        class_names=class_names,
+        root_path=root_path,
+        data_file_list=data_file_list,
+        training=training,
+        logger=logger,
+    )
+
+    if merge_all_iters_to_one_epoch:
+        assert hasattr(dataset, 'merge_all_iters_to_one_epoch')
+        dataset.merge_all_iters_to_one_epoch(merge=True, epochs=total_epochs)
+
+    if dist:
+        if training:
+            sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+        else:
+            rank, world_size = common_utils.get_dist_info()
+            sampler = DistributedSampler(dataset, world_size, rank, shuffle=False)
+    else:
+        sampler = None
+    dataloader = DataLoader(
+        dataset, batch_size=batch_size, pin_memory=True, num_workers=workers,
+        shuffle=(sampler is None) and training, collate_fn=dataset.collate_batch,
+        drop_last=False, sampler=sampler, timeout=0, worker_init_fn=partial(common_utils.worker_init_fn, seed=seed)
+    )
+
+    return dataset, dataloader, sampler
+
+def build_my_dataloader(dataset_cfg, class_names, batch_size, dist, root_path=None, workers=4, seed=None,
+                     logger=None, training=True, merge_all_iters_to_one_epoch=False, total_epochs=0):
+
+    dataset = __all__[dataset_cfg.DATASET](
+        dataset_cfg=dataset_cfg,
+        class_names=class_names,
+        root_path=root_path,
+        training=training,
+        logger=logger,
+    )
     if merge_all_iters_to_one_epoch:
         assert hasattr(dataset, 'merge_all_iters_to_one_epoch')
         dataset.merge_all_iters_to_one_epoch(merge=True, epochs=total_epochs)

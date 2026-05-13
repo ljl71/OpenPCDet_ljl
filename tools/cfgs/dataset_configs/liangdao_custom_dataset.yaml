@@ -1,0 +1,79 @@
+DATASET: 'CustomDataset'
+DATA_PATH: '../data/liangdao_custom'
+
+POINT_CLOUD_RANGE: [-75.2, -75.2, -2, 75.2, 75.2, 4]
+
+# POINT_CLOUD_RANGE: [ -100, -100, -2, 250, 250, 30]
+
+
+
+DATA_SPLIT: {
+    'train': train,
+    'test': val
+}
+
+INFO_PATH: {
+    'train': [custom_infos_train.pkl],
+    'test': [custom_infos_val.pkl],
+}
+
+POINT_FEATURE_ENCODING: {
+    encoding_type: absolute_coordinates_encoding,
+    used_feature_list: ['x', 'y', 'z', 'intensity'],
+    src_feature_list: ['x', 'y', 'z', 'intensity'],
+}
+
+DATA_AUGMENTOR:
+    DISABLE_AUG_LIST: ['placeholder']
+    AUG_CONFIG_LIST:
+        - NAME: gt_sampling
+          USE_ROAD_PLANE: False
+          DB_INFO_PATH:
+              - custom_dbinfos_train.pkl
+          PREPARE: {
+            #  filter_by_min_points: ['Person:5', 'Trailer:5', 'Other:5', 'Cart:5', 'Traffic_barrier:5', 
+            # 'Off-road_car:5', 'Bus:5', 'Cone_barrel:5', 'Tricycle:5', 
+            # 'Traffic_barrier_cluster:5', 'Traffic_caution:5', 'Other_vehicle:5', 'Cluster:5',
+            # 'Car:5', 'Moto:5', 'Obstacle:5', 'Bike:5', 'Bumpers:5', 'Truck:5', 'Lorry:5'],
+
+            filter_by_min_points: ['car:5', 'truck:5', 'motorcycle:5', 'pedestrian:5', 'pyclist:5'],
+          }
+          # SAMPLE_GROUPS: ['Person:10', 'Trailer:15', 'Other:15', 'Cart:15', 'Traffic_barrier:5', 
+          #   'Off-road_car:15', 'Bus:15', 'Cone_barrel:5', 'Tricycle:10', 
+          #   'Traffic_barrier_cluster:20', 'Traffic_caution:5', 'Other_vehicle:15', 'Cluster:20',
+          #   'Car:15', 'Moto:10', 'Obstacle:5', 'Bike:10', 'Bumpers:5', 'Truck:15', 'Lorry:15'
+          # ]
+
+          SAMPLE_GROUPS: ['car:20', 'truck:20', 'motorcycle:15', 'pedestrian:20', 'cyclist:20']
+
+          NUM_POINT_FEATURES: 4
+          DATABASE_WITH_FAKELIDAR: False
+          REMOVE_EXTRA_WIDTH: [0.0, 0.0, 0.0]
+          LIMIT_WHOLE_SCENE: True
+
+        - NAME: random_world_flip
+          ALONG_AXIS_LIST: ['x', 'y']
+
+        - NAME: random_world_rotation
+          WORLD_ROT_ANGLE: [-0.78539816, 0.78539816]
+
+        - NAME: random_world_scaling
+          WORLD_SCALE_RANGE: [0.95, 1.05]
+
+DATA_PROCESSOR:
+    - NAME: mask_points_and_boxes_outside_range
+      REMOVE_OUTSIDE_BOXES: True
+
+    - NAME: shuffle_points
+      SHUFFLE_ENABLED: {
+        'train': True,
+        'test': False
+      }
+
+    - NAME: transform_points_to_voxels
+      VOXEL_SIZE: [0.1, 0.1, 0.15]
+      MAX_POINTS_PER_VOXEL: 5
+      MAX_NUMBER_OF_VOXELS: {
+        'train': 16000,
+        'test': 40000
+      }
