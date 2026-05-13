@@ -14,7 +14,7 @@
 2. 支持公司 26 类标签。
 3. 支持 LiDAR-only 训练闭环。
 4. 支持单帧点云训练，默认 `MAX_SWEEPS: 1`。
-5. 支持 `.bin` 点云文件，默认每个点为 4 维：`x, y, z, intensity`。
+5. 支持 `.bin` 点云文件，默认每个点为 6 维：`x, y, z, intensity, ring, timestamp`。
 6. 生成 OpenPCDet 训练需要的 `infos_train.pkl` 和 `infos_val.pkl`。
 7. 提供 26 类 CenterPoint 配置。
 8. 提供 26 类 VoxelNeXt 配置。
@@ -320,7 +320,9 @@ DATASET: CompanyNuScenesDataset
 DATA_PATH: ../data/company_nuscenes
 VERSION: v1.0-mini
 MAX_SWEEPS: 1
-LIDAR_POINT_DIM: 4
+LIDAR_POINT_DIM: 6
+LIDAR_POINT_FORMAT: xyzirt
+LIDAR_POINT_FIELDS: ['x', 'y', 'z', 'intensity', 'ring', 'timestamp']
 ```
 
 如果你的实际版本目录不是 `v1.0-mini`，需要改：
@@ -335,28 +337,41 @@ VERSION:
 
 ## 7. 点云格式要求
 
-当前项目默认点云是 `.bin` 文件，每个点 4 个 `float32`：
+当前项目默认点云是 `.bin` 文件，每个点字段顺序为：
 
 ```text
-x y z intensity
+x y z intensity ring timestamp
 ```
 
-也就是：
+对应公司 LiDAR 点类型：
 
-```python
-np.fromfile(path, dtype=np.float32).reshape(-1, 4)
+```cpp
+POINT_CLOUD_REGISTER_POINT_STRUCT(lslidar_dfcx::PointXYZIRT,
+    (float, x, x)
+    (float, y, y)
+    (float, z, z)
+    (float, intensity, intensity)
+    (std::uint16_t, ring, ring)
+    (float, time, time)
+)
 ```
 
 配置文件中对应：
 
 ```yaml
+LIDAR_POINT_DIM: 6
+LIDAR_POINT_FORMAT: xyzirt
+LIDAR_POINT_FIELDS: ['x', 'y', 'z', 'intensity', 'ring', 'timestamp']
+
 POINT_FEATURE_ENCODING:
   encoding_type: absolute_coordinates_encoding
-  used_feature_list: ['x', 'y', 'z', 'intensity']
-  src_feature_list: ['x', 'y', 'z', 'intensity']
+  used_feature_list: ['x', 'y', 'z', 'intensity', 'ring', 'timestamp']
+  src_feature_list: ['x', 'y', 'z', 'intensity', 'ring', 'timestamp']
 ```
 
-如果你的点云不是 4 维，例如：
+这里的 `timestamp` 对应 PCL 结构体里的 `time` 字段。读取代码会按字段名做一次映射，所以 PCD 里叫 `time` 或 `timestamp` 都可以进入 `timestamp` 特征。
+
+如果你的点云不是公司当前 6 字段格式，例如：
 
 ```text
 x y z
@@ -365,7 +380,7 @@ x y z
 或者：
 
 ```text
-x y z intensity ring timestamp
+x y z intensity
 ```
 
 就必须同步修改：
@@ -378,7 +393,7 @@ POINT_FEATURE_ENCODING
 否则最常见的错误是：
 
 ```text
-cannot reshape array of size ... into shape (-1,4)
+cannot reshape ... to LIDAR_POINT_DIM=...
 ```
 
 ---
@@ -900,13 +915,14 @@ company_voxelnext_26cls.yaml
 
 ### 18.3 点云维度兼容
 
-以前推理数据读取逻辑会固定往点云里插入两列，导致原始 intensity 没有被正确使用。
+以前推理数据读取逻辑会按固定 4 维 reshape，或者固定往点云里插入两列，导致公司 `ring/time` 字段和原始 intensity 没有被正确使用。
 
 现在 `DataSet.py` 里会根据配置自动处理点云维度：
 
-1. 如果点云维度少于配置要求，会补 0。
-2. 如果点云维度多于配置要求，会截断。
-3. 如果点云本来有 intensity，会尽量保留。
+1. 公司配置会按 `x, y, z, intensity, ring, timestamp` 读取。
+2. `ring` 是 `uint16_t`，`time/timestamp` 是 `float`，代码支持 PCL 字段顺序的混合类型 `.bin`。
+3. 如果 `.bin` 是转换脚本导出的 6 列 `float32`，也会尽量自动识别。
+4. 如果点云维度少于配置要求，会补 0；如果多于配置要求，会按配置字段对齐。
 
 这可以减少训练配置和自动标注输入格式不一致导致的问题。
 
@@ -1253,12 +1269,16 @@ LIDAR_POINT_DIM
 POINT_FEATURE_ENCODING
 ```
 
-如果 `.bin` 是 4 维，就应该是：
+如果 `.bin` 是公司当前格式，就应该是：
 
 ```yaml
-LIDAR_POINT_DIM: 4
-src_feature_list: ['x', 'y', 'z', 'intensity']
+LIDAR_POINT_DIM: 6
+LIDAR_POINT_FORMAT: xyzirt
+LIDAR_POINT_FIELDS: ['x', 'y', 'z', 'intensity', 'ring', 'timestamp']
+src_feature_list: ['x', 'y', 'z', 'intensity', 'ring', 'timestamp']
 ```
+
+如果你的历史数据仍然是 4 维 `x, y, z, intensity`，读取代码可以把缺失的 `ring/timestamp` 补 0；但如果希望继续使用旧的 4 维模型输入或旧 checkpoint，需要把 `LIDAR_POINT_FORMAT` 改回 `float32`，并同步把 `LIDAR_POINT_DIM` 和 `POINT_FEATURE_ENCODING` 改回 4 维。
 
 ### 23.6 CUDA / spconv 报错
 
@@ -1442,4 +1462,3 @@ $env:PCDET_CKPT_PATH="G:\DFAC\WXY\OpenPCDet_ljl\output\xxx\ckpt\checkpoint_epoch
 最重要的原则：
 
 > 先确认数据闭环，再确认类别闭环，最后才训练模型。
-

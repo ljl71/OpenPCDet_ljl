@@ -8,8 +8,9 @@ This adapter keeps the official nuScenes dataset code untouched and adds a first
 - Data root: `data/company_nuscenes/v1.0-mini`
 - LiDAR only, no camera dependency
 - Single frame only: `MAX_SWEEPS: 1`
-- Raw LiDAR binary dimension: `LIDAR_POINT_DIM: 4`
-- Model input features: `x, y, z, intensity`
+- Raw LiDAR binary dimension: `LIDAR_POINT_DIM: 6`
+- Raw LiDAR binary fields: `x, y, z, intensity, ring, timestamp`
+- Model input features: `x, y, z, intensity, ring, timestamp`
 - Debug config: 12 classes that actually appear in the current mini annotations
 - Full config: 26 company classes from `category.json`
 - DB sampling disabled
@@ -38,7 +39,7 @@ python tools/company_nuscenes/smoke_test_company_dataloader.py
 Expected checks:
 
 - dataset length is non-zero
-- `points` has 4 feature columns plus batch index after collation
+- `points` has 6 feature columns plus batch index after collation
 - `gt_boxes` is non-empty
 - the last `gt_boxes` column contains class ids
 

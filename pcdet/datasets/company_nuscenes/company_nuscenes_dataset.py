@@ -3,10 +3,9 @@ import pickle
 from collections import Counter
 from pathlib import Path
 
-import numpy as np
-
 from ..dataset import DatasetTemplate
 from . import company_nuscenes_utils
+from . import point_io
 
 
 class CompanyNuScenesDataset(DatasetTemplate):
@@ -16,8 +15,8 @@ class CompanyNuScenesDataset(DatasetTemplate):
             dataset_cfg=dataset_cfg, class_names=class_names, training=training, root_path=root_path, logger=logger
         )
         self.infos = []
-        self.point_dim = len(self.dataset_cfg.POINT_FEATURE_ENCODING.src_feature_list)
-        self.lidar_point_dim = self.dataset_cfg.get('LIDAR_POINT_DIM', self.point_dim)
+        self.point_dim = len(point_io.get_src_feature_list(self.dataset_cfg))
+        self.lidar_point_dim = point_io.get_lidar_point_dim(self.dataset_cfg, default=self.point_dim)
         self.include_company_nuscenes_data(self.mode)
 
     def _log(self, msg):
@@ -37,40 +36,6 @@ class CompanyNuScenesDataset(DatasetTemplate):
         self.infos.extend(company_infos)
         self._log('Total samples for CompanyNuScenes dataset: %d' % len(company_infos))
 
-    @staticmethod
-    def _read_binary_pcd(path, target_dim):
-        with open(path, 'rb') as f:
-            header = []
-            while True:
-                line = f.readline()
-                if not line:
-                    raise ValueError(f'Invalid PCD file without DATA line: {path}')
-                decoded = line.decode('ascii', errors='ignore').strip()
-                header.append(decoded)
-                if decoded.startswith('DATA'):
-                    break
-            payload = f.read()
-
-        fields = []
-        points = None
-        for line in header:
-            if line.startswith('FIELDS'):
-                fields = line.split()[1:]
-            elif line.startswith('POINTS'):
-                points = int(line.split()[1])
-        if not fields or points is None:
-            raise ValueError(f'Unsupported PCD header: {path}')
-
-        arr = np.frombuffer(payload, dtype=np.float32)
-        arr = arr.reshape(points, len(fields))
-        field_to_idx = {name: idx for idx, name in enumerate(fields)}
-
-        output = np.zeros((points, target_dim), dtype=np.float32)
-        for out_idx, name in enumerate(['x', 'y', 'z', 'intensity'][:target_dim]):
-            if name in field_to_idx:
-                output[:, out_idx] = arr[:, field_to_idx[name]]
-        return output
-
     def read_lidar(self, lidar_path):
         lidar_path = Path(lidar_path)
         if not lidar_path.is_absolute():
@@ -85,24 +50,11 @@ class CompanyNuScenesDataset(DatasetTemplate):
             raise FileNotFoundError(f'Lidar file not found: {lidar_path}')
 
         if lidar_path.suffix == '.pcd':
-            return self._read_binary_pcd(lidar_path, target_dim=self.point_dim)
+            return point_io.read_binary_pcd(lidar_path, self.dataset_cfg)
 
-        points = np.fromfile(str(lidar_path), dtype=np.float32)
-        if points.size % self.lidar_point_dim != 0:
-            raise ValueError(
-                f'Cannot reshape {lidar_path} with {points.size} floats '
-                f'to LIDAR_POINT_DIM={self.lidar_point_dim}'
-            )
-
-        points = points.reshape(-1, self.lidar_point_dim)
-        if self.lidar_point_dim == self.point_dim:
-            return points
-        if self.lidar_point_dim > self.point_dim:
-            return points[:, :self.point_dim]
-
-        padded_points = np.zeros((points.shape[0], self.point_dim), dtype=points.dtype)
-        padded_points[:, :self.lidar_point_dim] = points
-        return padded_points
+        return point_io.read_lidar_bin(
+            lidar_path, self.dataset_cfg, fallback_dim=self.lidar_point_dim
+        )
 
     def get_lidar_with_sweeps(self, index, max_sweeps=1):
         if max_sweeps != 1:

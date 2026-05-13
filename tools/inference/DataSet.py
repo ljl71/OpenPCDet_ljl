@@ -2,6 +2,7 @@ import os
 import glob
 import numpy as np
 from pcdet.datasets import DatasetTemplate
+from pcdet.datasets.company_nuscenes import point_io
 import os
 import copy
 from pathlib import Path
@@ -9,11 +10,15 @@ from torch.utils.data import DistributedSampler as _DistributedSampler
 # from datasets import load_dataset
 
 
-def format_points_for_config(points, dataset_cfg):
+def format_points_for_config(points, dataset_cfg, point_fields=None):
     points = np.asarray(points, dtype=np.float32)
     points = points[~np.isnan(points).any(axis=1), :]
 
-    target_dim = len(dataset_cfg.POINT_FEATURE_ENCODING.src_feature_list)
+    src_feature_list = point_io.get_src_feature_list(dataset_cfg)
+    if point_fields is not None:
+        return point_io.align_points_to_features(points, point_fields, src_feature_list)
+
+    target_dim = len(src_feature_list)
     if points.shape[1] == target_dim:
         return points
     if points.shape[1] > target_dim:
@@ -38,7 +43,7 @@ class Dataset(DatasetTemplate):
             dataset_cfg=dataset_cfg, class_names=class_names, training=training
         )
         self.infos = []
-        self.shape = shape
+        self.shape = dataset_cfg.get('LIDAR_POINT_DIM', shape)
         self.sample_file_list = data_file_list
 
     def __len__(self):
@@ -46,18 +51,24 @@ class Dataset(DatasetTemplate):
 
     def __getitem__(self, index):
         # return data_dict
-        # print(self.sample_file_list[index].suffix)
-        if self.sample_file_list[index][-4:] == '.bin':
-            points = np.fromfile(self.sample_file_list[index], dtype=np.float32).reshape(-1, self.shape)
-        elif self.sample_file_list[index][-4:] == '.npy':
-            points = np.load(self.sample_file_list[index])
-        elif self.sample_file_list[index][-4:] == '.pcd':
+        sample_path = Path(self.sample_file_list[index])
+        suffix = sample_path.suffix.lower()
+        if suffix == '.bin':
+            points = point_io.read_lidar_bin(
+                sample_path, self.dataset_cfg, fallback_dim=self.shape
+            )
+        elif suffix == '.npy':
+            points = np.load(sample_path)
+        elif suffix == '.pcd':
             from pyntcloud import PyntCloud
-            path = str(self.sample_file_list[index])
+            path = str(sample_path)
 
             try:
                 pcd_load = PyntCloud.from_file(path)
-                points = np.asarray(pcd_load.points)
+                point_fields = list(pcd_load.points.columns)
+                points = format_points_for_config(
+                    np.asarray(pcd_load.points), self.dataset_cfg, point_fields=point_fields
+                )
             except:
                 from pypcd import pypcd
                 import pandas as pd
@@ -96,6 +107,5 @@ def getDataFromURL(URL):
     data_url_list = list(Path(URL).glob('*.*'))
     data_url_list.sort()
     return data_url_list
-
 
 
