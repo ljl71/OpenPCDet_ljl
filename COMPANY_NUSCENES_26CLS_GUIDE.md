@@ -6,6 +6,264 @@
 
 ---
 
+## 0. 拿到正式公司数据后，怎么处理才能正确跑
+
+这一节是最短实操路径。你拿到公司的正式数据集后，先按这里处理，确认数据闭环没问题，再去看后面的详细解释。
+
+### 0.1 先分清 mini 和正式数据
+
+当前本机这份数据：
+
+```text
+OpenPCDet_ljl/data/company_nuscenes/v1.0-mini/
+```
+
+它的 `category.json` 是 26 类，训练配置也是 26 类，但当前 mini 样本里实际出现 GT 标注的只有 12 类。也就是说：
+
+1. `v1.0-mini` 可以验证代码、目录、info 生成、dataloader、训练入口是否能跑通。
+2. `v1.0-mini` 不是完整正式训练集。
+3. 如果要训练真正的 26 类模型，需要换成公司的正式数据集。
+4. 正式数据集最好 26 类都有样本；如果某些类在正式数据里本来就是 0 个样本，模型配置仍然能跑 26 类，但这些 0 样本类别学不到有效检测能力。
+
+### 0.2 正式数据应该放成什么目录结构
+
+推荐在 Linux 服务器上使用下面结构：
+
+```text
+/workspace/OpenPCDet_ljl/
+└── data/
+    └── company_nuscenes/
+        └── v1.0-trainval/
+            ├── category.json
+            ├── instance.json
+            ├── sample.json
+            ├── sample_annotation.json
+            ├── sample_data.json
+            ├── calibrated_sensor.json
+            ├── ego_pose.json
+            ├── scene.json
+            ├── sensor.json
+            ├── attribute.json
+            ├── visibility.json
+            ├── log.json
+            ├── map.json
+            ├── samples/
+            │   └── LIDAR_TOP/
+            │       ├── xxxxx.bin
+            │       ├── yyyyy.bin
+            │       └── ...
+            ├── ImageSets/
+            │   ├── train.txt
+            │   └── val.txt
+            ├── company_nuscenes_infos_train.pkl
+            └── company_nuscenes_infos_val.pkl
+```
+
+其中 `company_nuscenes_infos_train.pkl` 和 `company_nuscenes_infos_val.pkl` 是后面生成出来的，不是公司原始数据里必须自带的文件。
+
+生成 info 最少需要这些文件存在：
+
+```text
+category.json
+instance.json
+sample.json
+sample_annotation.json
+sample_data.json
+calibrated_sensor.json
+ego_pose.json
+scene.json
+samples/LIDAR_TOP/*.bin
+```
+
+建议把 `sensor.json`、`attribute.json`、`visibility.json`、`log.json`、`map.json` 也一起保留，目录更接近完整 nuScenes 风格，后续扩展评估或可视化时不容易缺文件。
+
+### 0.3 原始数据必须满足的关键条件
+
+正式数据不是只把几个 json 放进去就行，还要满足下面这些关系：
+
+1. `sample.json` 每一帧要能通过 `data["LIDAR_TOP"]` 找到对应的 `sample_data` 记录。
+2. `sample_data.json` 里的 LiDAR `filename` 应该指向类似 `samples/LIDAR_TOP/xxxxx.bin` 的相对路径。
+3. `samples/LIDAR_TOP/xxxxx.bin` 文件必须真实存在。
+4. `sample_annotation.json` 里的每个 annotation 要能通过 `instance_token` 找到 `instance.json`。
+5. `instance.json` 里的每个 instance 要能通过 `category_token` 找到 `category.json`。
+6. `category.json` 里的类别名应使用公司 26 类原始名，例如 `vehicle.car`、`human.pedestrian.adult`、`movable_object.trafficcone`。
+7. `calibrated_sensor.json` 和 `ego_pose.json` 中的 token 要能被 LiDAR 的 `sample_data` 记录找到。
+
+当前配置默认按 6 维点云读取：
+
+```text
+x, y, z, intensity, ring, timestamp
+```
+
+对应配置在：
+
+```text
+tools/cfgs/dataset_configs/company_nuscenes_dataset.yaml
+```
+
+如果正式数据的点云不是这 6 维，需要同步修改 `LIDAR_POINT_DIM`、`LIDAR_POINT_FORMAT`、`LIDAR_POINT_FIELDS` 和 `POINT_FEATURE_ENCODING`，否则容易出现 `cannot reshape array` 或特征维度不对。
+
+### 0.4 如果正式数据在服务器独立目录，推荐用软链接
+
+假设公司正式数据实际放在：
+
+```text
+/data/company_nuscenes/v1.0-trainval/
+```
+
+可以这样接到项目里：
+
+```bash
+cd /workspace/OpenPCDet_ljl
+
+mkdir -p data/company_nuscenes
+ln -s /data/company_nuscenes/v1.0-trainval data/company_nuscenes/v1.0-trainval
+```
+
+如果不能软链接，也可以直接复制到：
+
+```text
+/workspace/OpenPCDet_ljl/data/company_nuscenes/v1.0-trainval/
+```
+
+### 0.5 修改数据版本配置
+
+正式训练前，把数据配置里的版本改成正式数据目录名：
+
+```yaml
+# tools/cfgs/dataset_configs/company_nuscenes_dataset.yaml
+VERSION: 'v1.0-trainval'
+```
+
+当前默认是：
+
+```yaml
+VERSION: 'v1.0-mini'
+```
+
+如果你忘了改，训练会继续读 mini 数据，而不是正式数据。
+
+### 0.6 生成训练 infos
+
+从项目根目录执行：
+
+```bash
+cd /workspace/OpenPCDet_ljl
+
+python tools/company_nuscenes/create_company_infos.py \
+  --version v1.0-trainval \
+  --train_ratio 0.8 \
+  --seed 0
+```
+
+生成完成后应该看到：
+
+```text
+data/company_nuscenes/v1.0-trainval/company_nuscenes_infos_train.pkl
+data/company_nuscenes/v1.0-trainval/company_nuscenes_infos_val.pkl
+```
+
+如果你的正式数据不在项目的 `data/company_nuscenes` 下面，也可以显式指定路径：
+
+```bash
+python tools/company_nuscenes/create_company_infos.py \
+  --data_path /data/company_nuscenes \
+  --save_path /workspace/OpenPCDet_ljl/data/company_nuscenes \
+  --version v1.0-trainval \
+  --train_ratio 0.8 \
+  --seed 0
+```
+
+如果 `ImageSets/train.txt` 和 `ImageSets/val.txt` 不存在，脚本会根据 `scene.json` 自动按 `train_ratio` 生成。你也可以自己提前写好这两个文件，里面每行放一个 scene name。
+
+### 0.7 检查 infos 和类别
+
+先做普通检查：
+
+```bash
+cd /workspace/OpenPCDet_ljl
+
+python tools/company_nuscenes/check_company_infos.py \
+  --root data/company_nuscenes/v1.0-trainval
+```
+
+你重点看这些结果：
+
+```text
+samples > 0
+missing_lidar_paths: 0
+classes: 类别数量合理
+outside_config: []
+```
+
+如果你希望正式数据必须覆盖全部 26 类，再跑严格检查：
+
+```bash
+python tools/company_nuscenes/check_company_infos.py \
+  --root data/company_nuscenes/v1.0-trainval \
+  --strict
+```
+
+注意：`--strict` 会要求 info 里的类别集合和 26 类配置完全一致。mini 数据只有 12 类，所以 mini 上跑 `--strict` 会失败，这是正常的。
+
+### 0.8 Dataloader 冒烟测试
+
+info 检查通过后，再确认 OpenPCDet dataloader 能真正读到点云和 GT：
+
+```bash
+cd /workspace/OpenPCDet_ljl
+
+python tools/company_nuscenes/smoke_test_company_dataloader.py \
+  --cfg_file /workspace/OpenPCDet_ljl/tools/cfgs/nuscenes_models/company_voxelnext_26cls.yaml
+```
+
+你希望看到：
+
+```text
+dataset_len > 0
+points_shape 有数据
+gt_boxes_shape 有数据
+first_gt_box 不是 None
+```
+
+如果 dataloader 冒烟测试失败，不要开始训练，先修数据路径、点云维度或 json token 关系。
+
+### 0.9 训练 26 类 VoxelNeXt
+
+从 `tools/` 目录启动训练：
+
+```bash
+cd /workspace/OpenPCDet_ljl/tools
+
+python train.py \
+  --cfg_file cfgs/nuscenes_models/company_voxelnext_26cls.yaml \
+  --batch_size 1 \
+  --epochs 20
+```
+
+训练输出通常在：
+
+```text
+/workspace/OpenPCDet_ljl/output/nuscenes_models/company_voxelnext_26cls/default/
+```
+
+### 0.10 最常见的错误判断
+
+如果你遇到问题，先按这个顺序排：
+
+1. `VERSION` 是否还是 `v1.0-mini`，导致训练没读正式数据。
+2. `data/company_nuscenes/v1.0-trainval` 是否真的存在。
+3. `category.json` 和 `scene.json` 是否缺失。
+4. `samples/LIDAR_TOP/*.bin` 是否缺失。
+5. `sample_data.json` 里的 `filename` 是否能和真实点云文件对上。
+6. 点云维度是否符合当前 6 维配置。
+7. `check_company_infos.py` 里是否有 `missing_lidar_paths`。
+8. `outside_config` 是否为空；如果不为空，说明出现了 26 类映射之外的标签名，需要改 `company_nuscenes_utils.py` 的类别映射或修正原始数据类别名。
+
+本机当前根目录下的 `G:\DFAC\WXY\v1.0-trainval` 只看到部分 json，缺 `category.json`、`scene.json`、`sensor.json`、`samples/LIDAR_TOP` 等关键内容，所以它还不能直接作为正式训练集使用。
+
+---
+
 ## 1. 项目现在能做什么
 
 当前 `OpenPCDet_ljl` 已经做了一个公司数据适配层，核心能力如下：
@@ -628,10 +886,16 @@ pip install -e .
 
 ## 11. 准备公司数据
 
-把数据放到：
+调试 mini 数据放到：
 
 ```text
 OpenPCDet_ljl/data/company_nuscenes/v1.0-mini/
+```
+
+正式训练数据建议放到：
+
+```text
+OpenPCDet_ljl/data/company_nuscenes/v1.0-trainval/
 ```
 
 至少应包含：
@@ -657,7 +921,9 @@ cd G:\DFAC\WXY\OpenPCDet_ljl
 python tools/company_nuscenes/prepare_company_mini.py
 ```
 
-这个脚本主要做几类事情：
+这个脚本只用于整理当前 mini 调试数据。正式数据一般不需要跑它，只要把正式数据按 `v1.0-trainval` 目录结构放好，直接运行 `create_company_infos.py --version v1.0-trainval` 即可。
+
+`prepare_company_mini.py` 主要做几类事情：
 
 1. 整理 mini 数据。
 2. 修正 LiDAR 文件路径。
@@ -675,14 +941,14 @@ OpenPCDet 训练前通常要先生成 infos。
 ```powershell
 cd G:\DFAC\WXY\OpenPCDet_ljl
 
-python tools/company_nuscenes/create_company_infos.py --cfg_file tools/cfgs/dataset_configs/company_nuscenes_dataset.yaml --version v1.0-mini
+python tools/company_nuscenes/create_company_infos.py --version v1.0-mini
 ```
 
 生成后应看到类似文件：
 
 ```text
-data/company_nuscenes/company_nuscenes_infos_train.pkl
-data/company_nuscenes/company_nuscenes_infos_val.pkl
+data/company_nuscenes/v1.0-mini/company_nuscenes_infos_train.pkl
+data/company_nuscenes/v1.0-mini/company_nuscenes_infos_val.pkl
 ```
 
 这些 pkl 文件里存的是训练需要的索引信息，不是模型权重。
@@ -735,6 +1001,8 @@ unknown classes = []
 ```powershell
 python tools/company_nuscenes/check_company_infos.py --strict
 ```
+
+注意：mini 调试数据当前只出现 12 类，跑 `--strict` 会因为缺少另外 14 类而失败。`--strict` 更适合正式 26 类数据集验收。
 
 如果这里失败，不要训练。先修数据。
 
@@ -1390,7 +1658,47 @@ git add -f tools/cfgs/dataset_configs/company_nuscenes_dataset.yaml
 
 ## 27. 推荐命令速查
 
-### 准备数据
+### 正式数据：挂载或软链接
+
+```bash
+cd /workspace/OpenPCDet_ljl
+
+mkdir -p data/company_nuscenes
+ln -s /data/company_nuscenes/v1.0-trainval data/company_nuscenes/v1.0-trainval
+```
+
+然后确认：
+
+```yaml
+# tools/cfgs/dataset_configs/company_nuscenes_dataset.yaml
+VERSION: 'v1.0-trainval'
+```
+
+### 正式数据：生成 infos
+
+```bash
+python tools/company_nuscenes/create_company_infos.py \
+  --version v1.0-trainval \
+  --train_ratio 0.8 \
+  --seed 0
+```
+
+### 正式数据：检查 infos
+
+```bash
+python tools/company_nuscenes/check_company_infos.py \
+  --root data/company_nuscenes/v1.0-trainval
+```
+
+如果要求正式集覆盖全部 26 类：
+
+```bash
+python tools/company_nuscenes/check_company_infos.py \
+  --root data/company_nuscenes/v1.0-trainval \
+  --strict
+```
+
+### mini 调试数据：准备数据
 
 ```powershell
 cd G:\DFAC\WXY\OpenPCDet_ljl
@@ -1398,22 +1706,17 @@ cd G:\DFAC\WXY\OpenPCDet_ljl
 python tools/company_nuscenes/prepare_company_mini.py
 ```
 
-### 生成 infos
+### mini 调试数据：生成 infos
 
 ```powershell
-python tools/company_nuscenes/create_company_infos.py --cfg_file tools/cfgs/dataset_configs/company_nuscenes_dataset.yaml --version v1.0-mini
-```
-
-### 检查 infos
-
-```powershell
-python tools/company_nuscenes/check_company_infos.py --strict
+python tools/company_nuscenes/create_company_infos.py --version v1.0-mini
 ```
 
 ### Dataloader 测试
 
-```powershell
-python tools/company_nuscenes/smoke_test_company_dataloader.py
+```bash
+python tools/company_nuscenes/smoke_test_company_dataloader.py \
+  --cfg_file /workspace/OpenPCDet_ljl/tools/cfgs/nuscenes_models/company_voxelnext_26cls.yaml
 ```
 
 ### 训练 CenterPoint 26 类
