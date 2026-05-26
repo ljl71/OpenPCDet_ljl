@@ -1,5 +1,40 @@
 # OpenPCDet_ljl 公司 26 类 nuScenes 数据训练与自动标注文档
 
+## 2026-05-26 正式数据适配修正（优先遵循）
+
+服务器上可训练的正式目录不是早期文档假定的嵌套目录，而是：
+
+```text
+/workspace/OpenPCDet/data/nuscenes/
+|-- samples/LIDAR_TOP/*.bin
+`-- v1.0-trainval/*.json
+```
+
+不要使用 `/workspace/OpenPCDet/data/v1.0-trainval`：其中的元数据仍引用 `.pcd`，但旁边没有对应样本文件。
+
+已经核验一组原始与转换点云：`LIDAR_TOP(yuan-pcd)` 中原始 PCD 的字段只有 `x y z`；同名生成 `LIDAR_TOP/*.bin` 每点有 4 个 `float32`，且抽查的第 4 列全为 `0.0`。因此当前 `.bin` 可作为四列输入使用，但第 4 列只是转换占位值，不能当作真实强度、`ring` 或 `timestamp`。正式数据和 mini 默认配置现均使用四列输入。
+
+正式数据生成 info、检查及训练请使用：
+
+```bash
+python tools/company_nuscenes/create_company_infos.py \
+  --data_path data/nuscenes \
+  --save_path data/nuscenes \
+  --version v1.0-trainval
+
+python tools/company_nuscenes/check_company_infos.py \
+  --root data/nuscenes/v1.0-trainval \
+  --data_root data/nuscenes \
+  --strict
+
+cd tools
+python train.py --cfg_file cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml --batch_size 1 --epochs 20
+```
+
+正式标注表声明 26 个类别，但现有 annotation 实际覆盖 24 个类别。因此 `--strict` 用于检查缺文件或配置外类别；只有确实要求所有配置类别都有标注时才额外传 `--require_all_classes`。下文中关于“6 维 `xyzirt`”、嵌套正式目录和旧 `--strict` 语义的早期内容，以本节修正为准。
+
+2026-05-26 的正式数据切分预览进一步确认：`num_lidar_pts >= 1` 或点数未知而保留的框共 `895317` 个，其中 `611` 个框的 `num_lidar_pts` 为 `null`；修正后的 scene-level `329/83` 切分使 24 个可学习类别全部进入训练集。`vehicle_emergency_other` 的有效框仅存在于一个 scene，因此该 scene 保留在训练集、验证集不覆盖该类别是预期行为。
+
 这份文档是给第一次接触本项目的人看的。它不假设你熟悉 OpenPCDet、nuScenes、CenterPoint、VoxelNeXt 或自动标注流程。
 
 本项目的目标是：在 OpenPCDet 基础上，支持公司自定义 26 类、nuScenes 风格数据集的 LiDAR 3D 检测训练，并让训练出来的模型可以接到后续自动标注推理流程里。

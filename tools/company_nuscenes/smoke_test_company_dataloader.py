@@ -11,7 +11,7 @@ def main():
     parser.add_argument(
         '--cfg_file',
         type=Path,
-        default=repo_root / 'tools' / 'cfgs' / 'nuscenes_models' / 'company_centerpoint_26cls.yaml'
+        default=repo_root / 'tools' / 'cfgs' / 'nuscenes_models' / 'company_voxelnext_26cls_trainval.yaml'
     )
     args = parser.parse_args()
 

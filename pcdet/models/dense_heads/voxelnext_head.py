@@ -141,7 +141,8 @@ class VoxelNeXtHead(nn.Module):
                 for idx, name in enumerate(gt_class_names):
                     if name not in cur_class_names:
                         continue
-                    temp_box = cur_gt_boxes[idx]
+                    # Keep global class ids intact while assigning local ids for this head.
+                    temp_box = cur_gt_boxes[idx].clone()
                     temp_box[-1] = cur_class_names.index(name) + 1
                     gt_boxes_single_head.append(temp_box[None, :])
 

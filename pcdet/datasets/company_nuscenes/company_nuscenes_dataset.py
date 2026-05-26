@@ -10,9 +10,10 @@ from . import point_io
 
 class CompanyNuScenesDataset(DatasetTemplate):
     def __init__(self, dataset_cfg, class_names, training=True, root_path=None, logger=None):
-        root_path = (root_path if root_path is not None else Path(dataset_cfg.DATA_PATH)) / dataset_cfg.VERSION
+        self.data_path = Path(root_path if root_path is not None else dataset_cfg.DATA_PATH)
+        self.metadata_path = self.data_path / dataset_cfg.VERSION
         super().__init__(
-            dataset_cfg=dataset_cfg, class_names=class_names, training=training, root_path=root_path, logger=logger
+            dataset_cfg=dataset_cfg, class_names=class_names, training=training, root_path=self.data_path, logger=logger
         )
         self.infos = []
         self.point_dim = len(point_io.get_src_feature_list(self.dataset_cfg))
@@ -27,7 +28,7 @@ class CompanyNuScenesDataset(DatasetTemplate):
         self._log('Loading CompanyNuScenes dataset')
         company_infos = []
         for info_path in self.dataset_cfg.INFO_PATH[mode]:
-            info_path = self.root_path / info_path
+            info_path = self.metadata_path / info_path
             if not info_path.exists():
                 self._log(f'Missing info file: {info_path}')
                 continue
@@ -38,16 +39,24 @@ class CompanyNuScenesDataset(DatasetTemplate):
 
     def read_lidar(self, lidar_path):
         lidar_path = Path(lidar_path)
-        if not lidar_path.is_absolute():
-            lidar_path = self.root_path / lidar_path
+        if lidar_path.is_absolute():
+            candidates = [lidar_path]
+        else:
+            candidates = [self.data_path / lidar_path, self.metadata_path / lidar_path]
 
-        if not lidar_path.exists() and lidar_path.suffix == '.pcd':
-            bin_path = lidar_path.with_suffix('.bin')
+        resolved_path = None
+        for candidate in candidates:
+            bin_path = candidate.with_suffix('.bin') if candidate.suffix == '.pcd' else candidate
             if bin_path.exists():
-                lidar_path = bin_path
+                resolved_path = bin_path
+                break
+            if candidate.exists():
+                resolved_path = candidate
+                break
 
-        if not lidar_path.exists():
-            raise FileNotFoundError(f'Lidar file not found: {lidar_path}')
+        if resolved_path is None:
+            raise FileNotFoundError(f'Lidar file not found; checked: {candidates}')
+        lidar_path = resolved_path
 
         if lidar_path.suffix == '.pcd':
             return point_io.read_binary_pcd(lidar_path, self.dataset_cfg)
@@ -81,7 +90,11 @@ class CompanyNuScenesDataset(DatasetTemplate):
 
         if 'gt_boxes' in info:
             if self.dataset_cfg.get('FILTER_MIN_POINTS_IN_GT', False):
-                mask = info['num_lidar_pts'] > self.dataset_cfg.FILTER_MIN_POINTS_IN_GT - 1
+                min_points = self.dataset_cfg.FILTER_MIN_POINTS_IN_GT
+                mask = [
+                    count is None or count >= min_points
+                    for count in info['num_lidar_pts']
+                ]
             else:
                 mask = None
             input_dict.update({
@@ -123,6 +136,7 @@ def create_company_nuscenes_infos(dataset_cfg, data_path, save_path, version):
         max_sweeps=dataset_cfg.MAX_SWEEPS,
         train_ratio=dataset_cfg.get('TRAIN_SPLIT_RATIO', 0.8),
         seed=dataset_cfg.get('SPLIT_SEED', 0),
+        min_lidar_points=dataset_cfg.get('FILTER_MIN_POINTS_IN_GT', 1),
     )
 
 
@@ -134,7 +148,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Company nuScenes data prep')
     parser.add_argument('--cfg_file', type=str, required=True)
     parser.add_argument('--func', type=str, default='create_company_nuscenes_infos')
-    parser.add_argument('--version', type=str, default='v1.0-mini')
+    parser.add_argument('--version', type=str, default='v1.0-trainval')
     args = parser.parse_args()
 
     dataset_cfg = EasyDict(yaml.safe_load(open(args.cfg_file)))
@@ -144,8 +158,8 @@ if __name__ == '__main__':
     if args.func == 'create_company_nuscenes_infos':
         create_company_nuscenes_infos(
             dataset_cfg=dataset_cfg,
-            data_path=root_dir / 'data' / 'company_nuscenes',
-            save_path=root_dir / 'data' / 'company_nuscenes',
+            data_path=root_dir / 'data' / 'nuscenes',
+            save_path=root_dir / 'data' / 'nuscenes',
             version=args.version,
         )
     else:

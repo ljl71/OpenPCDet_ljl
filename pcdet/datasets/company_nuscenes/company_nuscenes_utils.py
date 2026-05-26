@@ -70,6 +70,16 @@ COMPANY_RAW_CLASS_NAMES = [
 COMPANY_26_CLASS_NAMES = [COMPANY_NAME_MAPPING[name] for name in COMPANY_RAW_CLASS_NAMES]
 
 
+def annotation_point_count(annotation, key='num_lidar_pts'):
+    value = annotation.get(key)
+    return None if value is None else int(value)
+
+
+def annotation_passes_point_filter(annotation, min_lidar_points=1):
+    point_count = annotation_point_count(annotation)
+    return point_count is None or point_count >= min_lidar_points
+
+
 def normalize_category_name(raw_name):
     if raw_name in COMPANY_NAME_MAPPING:
         return COMPANY_NAME_MAPPING[raw_name]
@@ -142,7 +152,7 @@ def annotation_to_lidar_box(annotation, ego_pose, calibrated_sensor):
     return np.array([center[0], center[1], center[2], length, width, height, yaw], dtype=np.float32)
 
 
-def read_image_sets(root_path, train_ratio=0.8, seed=0):
+def read_image_sets(root_path, train_ratio=0.8, seed=0, min_lidar_points=1):
     image_sets = root_path / 'ImageSets'
     train_file = image_sets / 'train.txt'
     val_file = image_sets / 'val.txt'
@@ -153,49 +163,102 @@ def read_image_sets(root_path, train_ratio=0.8, seed=0):
         return train, val
 
     tables = load_company_tables(root_path)
-    train, val = make_scene_split(tables, train_ratio=train_ratio, seed=seed)
+    train, val = make_scene_split(
+        tables, train_ratio=train_ratio, seed=seed, min_lidar_points=min_lidar_points
+    )
     image_sets.mkdir(parents=True, exist_ok=True)
     train_file.write_text('\n'.join(train) + '\n', encoding='utf-8')
     val_file.write_text('\n'.join(val) + '\n', encoding='utf-8')
     return set(train), set(val)
 
 
-def make_scene_split(tables, train_ratio=0.8, seed=0):
+def make_scene_split(tables, train_ratio=0.8, seed=0, min_lidar_points=1):
     scene_names = [x['name'] for x in tables['scenes'].values()]
-    scene_classes = collect_scene_classes(tables)
+    scene_classes = collect_scene_classes(tables, min_lidar_points=min_lidar_points)
 
     target_train_count = max(1, int(len(scene_names) * train_ratio))
     if len(scene_names) > 1:
         target_train_count = min(target_train_count, len(scene_names) - 1)
+    target_val_count = len(scene_names) - target_train_count
 
     class_scene_counts = Counter()
     for classes in scene_classes.values():
         class_scene_counts.update(classes)
 
-    required_train = sorted([
+    required_train = set([
         scene_name for scene_name, classes in scene_classes.items()
         if any(class_scene_counts[name] == 1 for name in classes)
     ])
+    train_covered = set().union(*(scene_classes[x] for x in required_train)) if required_train else set()
+    additional_train, train_uncovered = select_cover_scenes(
+        scene_classes=scene_classes,
+        class_names=set(class_scene_counts) - train_covered,
+        candidate_scenes=[x for x in scene_names if x not in required_train],
+    )
+    if train_uncovered:
+        raise ValueError(f'Cannot allocate training scenes for annotated classes: {sorted(train_uncovered)}')
+    required_train.update(additional_train)
+    if len(required_train) > target_train_count:
+        raise ValueError(
+            f'Train split target {target_train_count} cannot cover required scenes: {sorted(required_train)}'
+        )
 
-    remaining = [x for x in scene_names if x not in required_train]
+    val_candidates = [x for x in scene_names if x not in required_train]
+    val_classes = {
+        class_name for class_name in class_scene_counts
+        if any(class_name in scene_classes.get(scene_name, set()) for scene_name in val_candidates)
+    }
+    required_val, val_uncovered = select_cover_scenes(
+        scene_classes=scene_classes,
+        class_names=val_classes,
+        candidate_scenes=val_candidates,
+    )
+    if val_uncovered:
+        raise ValueError(f'Cannot allocate validation scenes for annotated classes: {sorted(val_uncovered)}')
+    if len(required_val) > target_val_count:
+        raise ValueError(
+            f'Validation split target {target_val_count} cannot cover required scenes: {sorted(required_val)}'
+        )
+
+    remaining = [
+        x for x in scene_names
+        if x not in required_train and x not in set(required_val)
+    ]
     random.Random(seed).shuffle(remaining)
 
-    train = required_train[:]
-    for scene_name in remaining:
-        if len(train) >= target_train_count:
-            break
-        train.append(scene_name)
-
-    if len(train) == len(scene_names) and len(scene_names) > 1:
-        movable = [x for x in train if x not in required_train]
-        if movable:
-            train.remove(movable[-1])
-
-    val = [x for x in scene_names if x not in set(train)]
+    val = required_val + remaining[:target_val_count - len(required_val)]
+    val_set = set(val)
+    train = [x for x in scene_names if x not in val_set]
     return train, val
 
 
-def collect_scene_classes(tables):
+def select_cover_scenes(scene_classes, class_names, candidate_scenes):
+    uncovered = set(class_names)
+    candidates = set(candidate_scenes)
+    selected = []
+
+    while uncovered:
+        ranked = sorted(
+            candidates,
+            key=lambda scene_name: (
+                -len(scene_classes.get(scene_name, set()) & uncovered),
+                scene_name,
+            )
+        )
+        if not ranked:
+            break
+        best_scene = ranked[0]
+        covered = scene_classes.get(best_scene, set()) & uncovered
+        if not covered:
+            break
+        selected.append(best_scene)
+        candidates.remove(best_scene)
+        uncovered -= covered
+
+    return selected, uncovered
+
+
+def collect_scene_classes(tables, min_lidar_points=1):
     sample_to_scene = {
         sample['token']: tables['scenes'][sample['scene_token']]['name']
         for sample in tables['samples']
@@ -204,6 +267,8 @@ def collect_scene_classes(tables):
     for sample_token, annotations in tables['annos_by_sample'].items():
         scene_name = sample_to_scene[sample_token]
         for annotation in annotations:
+            if not annotation_passes_point_filter(annotation, min_lidar_points):
+                continue
             scene_classes[scene_name].add(raw_category_for_annotation(annotation, tables))
     return scene_classes
 
@@ -240,13 +305,15 @@ def raw_category_for_annotation(annotation, tables):
     return category['name']
 
 
-def build_sample_info(sample, tables, root_path, max_sweeps=1):
+def build_sample_info(sample, tables, root_path, data_path=None, max_sweeps=1):
     if max_sweeps != 1:
         raise NotImplementedError('CompanyNuScenes first-stage adapter supports MAX_SWEEPS=1 only.')
 
+    root_path = Path(root_path)
+    data_path = Path(data_path) if data_path is not None else root_path
     lidar_token = sample['data']['LIDAR_TOP']
     lidar_sd = tables['sample_data'][lidar_token]
-    lidar_path = resolve_lidar_path(root_path, lidar_sd['filename'])
+    lidar_path = resolve_lidar_path(root_path, lidar_sd['filename'], data_path=data_path)
 
     calibrated_sensor = tables['calibrated_sensors'][lidar_sd['calibrated_sensor_token']]
     ego_pose = tables['ego_poses'][lidar_sd['ego_pose_token']]
@@ -263,8 +330,8 @@ def build_sample_info(sample, tables, root_path, max_sweeps=1):
         boxes.append(annotation_to_lidar_box(annotation, ego_pose, calibrated_sensor))
         names.append(normalize_category_name(raw_name))
         raw_names.append(raw_name)
-        num_lidar_pts.append(annotation.get('num_lidar_pts', 0))
-        num_radar_pts.append(annotation.get('num_radar_pts', 0))
+        num_lidar_pts.append(annotation_point_count(annotation))
+        num_radar_pts.append(annotation_point_count(annotation, key='num_radar_pts'))
         tokens.append(annotation['token'])
 
     info = {
@@ -277,26 +344,41 @@ def build_sample_info(sample, tables, root_path, max_sweeps=1):
         'gt_names': np.asarray(names),
         'gt_raw_names': np.asarray(raw_names),
         'gt_boxes_token': np.asarray(tokens),
-        'num_lidar_pts': np.asarray(num_lidar_pts, dtype=np.int32),
-        'num_radar_pts': np.asarray(num_radar_pts, dtype=np.int32),
+        'num_lidar_pts': np.asarray(num_lidar_pts, dtype=object),
+        'num_radar_pts': np.asarray(num_radar_pts, dtype=object),
     }
-    info['lidar_path_exists'] = (root_path / info['lidar_path']).exists()
+    info['lidar_path_exists'] = (data_path / info['lidar_path']).exists()
     return info
 
 
-def resolve_lidar_path(root_path, filename):
+def resolve_lidar_path(root_path, filename, data_path=None):
+    metadata_path = Path(root_path)
+    data_path = Path(data_path) if data_path is not None else metadata_path
     lidar_path = Path(filename)
+    path_candidates = [lidar_path]
     if lidar_path.suffix == '.pcd':
-        bin_path = lidar_path.with_suffix('.bin')
-        if (root_path / bin_path).exists():
-            return bin_path
+        path_candidates.insert(0, lidar_path.with_suffix('.bin'))
+
+    for candidate in path_candidates:
+        for base_path in [data_path, metadata_path]:
+            absolute_path = base_path / candidate
+            if absolute_path.exists():
+                try:
+                    return absolute_path.relative_to(data_path)
+                except ValueError:
+                    return absolute_path
     return lidar_path
 
 
-def build_company_infos(root_path, max_sweeps=1, train_ratio=0.8, seed=0):
+def build_company_infos(
+        root_path, data_path=None, max_sweeps=1, train_ratio=0.8, seed=0, min_lidar_points=1
+):
     root_path = Path(root_path)
+    data_path = Path(data_path) if data_path is not None else root_path
     tables = load_company_tables(root_path)
-    train_scene_names, val_scene_names = read_image_sets(root_path, train_ratio=train_ratio, seed=seed)
+    train_scene_names, val_scene_names = read_image_sets(
+        root_path, train_ratio=train_ratio, seed=seed, min_lidar_points=min_lidar_points
+    )
 
     train_infos = []
     val_infos = []
@@ -307,7 +389,9 @@ def build_company_infos(root_path, max_sweeps=1, train_ratio=0.8, seed=0):
     samples = sorted(tables['samples'], key=lambda x: x.get('timestamp', 0))
     for sample in samples:
         scene_name = tables['scenes'][sample['scene_token']]['name']
-        info = build_sample_info(sample, tables, root_path=root_path, max_sweeps=max_sweeps)
+        info = build_sample_info(
+            sample, tables, root_path=root_path, data_path=data_path, max_sweeps=max_sweeps
+        )
         raw_counter.update(info['gt_raw_names'].tolist())
         mapped_counter.update(info['gt_names'].tolist())
 
@@ -329,12 +413,16 @@ def build_company_infos(root_path, max_sweeps=1, train_ratio=0.8, seed=0):
     return train_infos, val_infos, stats
 
 
-def create_company_nuscenes_infos(version, data_path, save_path, max_sweeps=1, train_ratio=0.8, seed=0):
-    root_path = Path(data_path) / version
+def create_company_nuscenes_infos(
+        version, data_path, save_path, max_sweeps=1, train_ratio=0.8, seed=0, min_lidar_points=1
+):
+    data_path = Path(data_path)
+    root_path = data_path / version
     save_path = Path(save_path) / version
 
     train_infos, val_infos, stats = build_company_infos(
-        root_path=root_path, max_sweeps=max_sweeps, train_ratio=train_ratio, seed=seed
+        root_path=root_path, data_path=data_path, max_sweeps=max_sweeps, train_ratio=train_ratio, seed=seed,
+        min_lidar_points=min_lidar_points
     )
 
     train_path = save_path / 'company_nuscenes_infos_train.pkl'
