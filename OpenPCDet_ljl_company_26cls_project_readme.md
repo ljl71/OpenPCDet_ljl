@@ -943,31 +943,35 @@ loss: 466.34649658203125
 
 ## 14. 正式训练
 
-进入 tools：
+进入 `tools` 目录：
 
 ```bash
 cd /workspace/OpenPCDet/tools
 ```
 
-训练命令：
+---
+
+### 14.1 首次跑通时使用的保守训练命令
+
+本项目第一次正式跑通时，为了最大程度降低显存风险，使用的是较保守的 `batch_size=1`：
 
 ```bash
 CUDA_VISIBLE_DEVICES=1 python train.py --cfg_file cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml --batch_size 1 --epochs 20 --workers 4 --extra_tag formal_company_26cls --ckpt_save_interval 1 --max_ckpt_save_num 20
 ```
 
-训练参数：
+该命令的作用是先验证完整训练链路，包括：
 
-| 参数 | 值 | 说明 |
-|---|---:|---|
-| `CUDA_VISIBLE_DEVICES` | `1` | 使用第二张 RTX 3090 |
-| `batch_size` | `1` | 降低显存风险 |
-| `epochs` | `20` | 训练 20 轮 |
-| `workers` | `4` | dataloader 进程数 |
-| `extra_tag` | `formal_company_26cls` | 实验输出标签 |
-| `ckpt_save_interval` | `1` | 每个 epoch 保存一次 |
-| `max_ckpt_save_num` | `20` | 最多保留 20 个 checkpoint |
+```text
+正式数据读取
+→ dataloader
+→ 26 类 VoxelNeXt
+→ forward / backward
+→ loss 下降
+→ checkpoint 保存
+→ epoch20 模型生成
+```
 
-训练耗时：
+本次 `batch_size=1` 的训练已经完整完成，训练耗时约：
 
 ```text
 20 epochs: 11:17:45
@@ -981,9 +985,229 @@ epochs: 100%|████████| 20/20 [11:17:45<00:00, 2033.27s/it, loss=
 End training nuscenes_models/company_voxelnext_26cls_trainval(formal_company_26cls)
 ```
 
-说明训练已经完整完成。
+说明 `batch_size=1` 版本已经成功跑通，并生成了完整的 20 个 checkpoint。
 
 ---
+
+### 14.2 为什么后续推荐改用 `batch_size=8`
+
+服务器使用的是 RTX 3090，单卡显存为 24GB。本次主要使用 GPU 1 进行训练：
+
+```text
+CUDA_VISIBLE_DEVICES=1
+```
+
+在第一次使用 `batch_size=1` 跑通后，又对更大的 batch size 做了测试。实际观察到：
+
+```text
+batch_size=4 时，GPU 1 显存约 5.1GB / 24GB
+batch_size=8 时，GPU 1 显存约 8.6GB / 24GB
+```
+
+这说明 `batch_size=1` 对当前服务器来说明显偏保守，`batch_size=8` 在显存上仍然比较安全。
+
+`batch_size=8, workers=4` 的训练速度大约为：
+
+```text
+2409 it/epoch
+约 2.27 it/s
+单 epoch 约 18 分钟
+```
+
+虽然 `it/s` 比 `batch_size=1` 低，但每个 iteration 处理 8 帧数据，因此实际样本吞吐更高：
+
+```text
+batch_size=1: 约 9.46 samples/s
+batch_size=8: 约 2.27 × 8 ≈ 18.16 samples/s
+```
+
+因此，`batch_size=8` 的实际训练吞吐大约是 `batch_size=1` 的接近 2 倍。
+
+此外，`batch_size=8, workers=4` 时日志中：
+
+```text
+d_time=0.00(0.01)
+f_time≈0.43~0.53
+b_time≈0.43~0.53
+```
+
+其中：
+
+| 字段 | 含义 | 当前判断 |
+|---|---|---|
+| `d_time` | 数据加载耗时 | 基本为 0，说明 dataloader 不是主要瓶颈 |
+| `f_time` | forward 前向耗时 | 主要计算耗时之一 |
+| `b_time` | backward 反向耗时 | 主要计算耗时之一 |
+
+这说明当前主要耗时在模型计算，而不是数据加载。因此 `workers=4` 已经够用，暂时没有必要强行提高到 `workers=8`。
+
+---
+
+### 14.3 当前推荐正式训练命令
+
+在当前服务器和数据配置下，推荐后续正式训练使用：
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python train.py --cfg_file cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml --batch_size 8 --epochs 20 --workers 4 --extra_tag formal_company_26cls_bs8 --ckpt_save_interval 1 --max_ckpt_save_num 20
+```
+
+参数说明：
+
+| 参数 | 推荐值 | 说明 |
+|---|---:|---|
+| `CUDA_VISIBLE_DEVICES` | `1` | 使用第二张 RTX 3090，避开 GPU 0 上的桌面和其他进程 |
+| `batch_size` | `8` | 当前服务器上显存安全，吞吐明显高于 `batch_size=1` |
+| `epochs` | `20` | 与首次跑通实验保持一致，方便对比 |
+| `workers` | `4` | 当前 `d_time` 很低，数据加载不是瓶颈，暂不必增加 |
+| `extra_tag` | `formal_company_26cls_bs8` | 新实验单独保存，避免覆盖首次跑通结果 |
+| `ckpt_save_interval` | `1` | 每个 epoch 保存一次 checkpoint |
+| `max_ckpt_save_num` | `20` | 最多保留 20 个 checkpoint |
+
+---
+
+### 14.4 新训练结果会保存在哪里
+
+使用：
+
+```text
+--extra_tag formal_company_26cls_bs8
+```
+
+后，新的训练输出目录会变成：
+
+```text
+/workspace/OpenPCDet/output/nuscenes_models/company_voxelnext_26cls_trainval/formal_company_26cls_bs8/
+```
+
+宿主机对应路径：
+
+```text
+/home/ubuntu/WXY/OpenPCDet_ljl/output/nuscenes_models/company_voxelnext_26cls_trainval/formal_company_26cls_bs8/
+```
+
+checkpoint 会保存在：
+
+```text
+/workspace/OpenPCDet/output/nuscenes_models/company_voxelnext_26cls_trainval/formal_company_26cls_bs8/ckpt/
+```
+
+不会覆盖之前 `batch_size=1` 首次跑通的实验目录：
+
+```text
+/workspace/OpenPCDet/output/nuscenes_models/company_voxelnext_26cls_trainval/formal_company_26cls/
+```
+
+因此可以同时保留：
+
+```text
+formal_company_26cls      # 首次 batch_size=1 跑通结果
+formal_company_26cls_bs8  # 推荐 batch_size=8 新训练结果
+```
+
+---
+
+### 14.5 是否需要使用 `workers=8`
+
+当前不强制推荐。
+
+原因是 `batch_size=8, workers=4` 时：
+
+```text
+d_time=0.00(0.01)
+```
+
+说明数据加载时间非常低，dataloader 基本没有拖慢训练。此时把 `workers` 从 4 提到 8，收益可能不明显，甚至可能增加 CPU 调度开销。
+
+如果后续想进一步比较，也可以单独跑一个 1 epoch 的测试：
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python train.py --cfg_file cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml --batch_size 8 --epochs 1 --workers 8 --extra_tag formal_company_26cls_bs8_w8_test --ckpt_save_interval 1 --max_ckpt_save_num 2
+```
+
+比较重点：
+
+```text
+1. it/s 是否明显提升；
+2. 单 epoch 时间是否缩短；
+3. d_time 是否下降；
+4. CPU 是否明显卡顿；
+5. 训练是否稳定。
+```
+
+如果 `workers=8` 没有明显提升，就继续使用：
+
+```text
+batch_size=8, workers=4
+```
+
+---
+
+### 14.6 是否需要尝试 `batch_size=16`
+
+可以尝试，但不建议直接作为默认正式训练配置。
+
+原因是 3D 点云训练的显存占用会随着不同 batch 中点数、voxel 数和 GT 数量波动。虽然当前 `batch_size=8` 只占用约 8.6GB 显存，但 `batch_size=16` 在某些点云密集 batch 上可能出现更高峰值。
+
+如果要测试，可以先跑 1 个 epoch：
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python train.py --cfg_file cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml --batch_size 16 --epochs 1 --workers 4 --extra_tag formal_company_26cls_bs16_test --ckpt_save_interval 1 --max_ckpt_save_num 2
+```
+
+判断标准：
+
+```text
+显存 < 18GB：可以考虑
+显存 18GB～21GB：能跑但需要谨慎
+显存 > 21GB：不建议长期训练，容易在个别 batch OOM
+```
+
+当前综合稳定性和训练速度，默认推荐仍然是：
+
+```text
+batch_size=8, workers=4
+```
+
+---
+
+### 14.7 学习率是否需要跟着 batch size 修改
+
+暂时不建议立刻修改学习率。
+
+虽然从理论上讲，batch size 从 1 增大到 8 后，可以进一步研究学习率缩放，但当前阶段主要目标是获得一个稳定、可复现的公司 26 类 baseline。为了避免同时改变多个变量，建议：
+
+```text
+先只修改 batch_size，不改学习率；
+确认 batch_size=8 能稳定完整训练；
+再根据 loss 曲线和验证结果决定是否调学习率。
+```
+
+因此当前推荐命令仍然保持原配置中的学习率，只修改：
+
+```text
+batch_size: 1 -> 8
+extra_tag: formal_company_26cls -> formal_company_26cls_bs8
+```
+
+---
+
+### 14.8 当前训练配置结论
+
+当前阶段推荐结论：
+
+```text
+首次跑通记录：batch_size=1, workers=4, extra_tag=formal_company_26cls
+后续正式推荐：batch_size=8, workers=4, extra_tag=formal_company_26cls_bs8
+暂不强制使用：workers=8
+暂不默认使用：batch_size=16
+暂不修改：学习率
+```
+
+一句话总结：
+
+> `batch_size=1` 适合首次跑通链路，但对 RTX 3090 24GB 来说偏保守；实测 `batch_size=8` 显存仍然安全，训练吞吐明显更高，因此后续正式训练建议使用 `batch_size=8, workers=4`。
+
+
 
 ## 15. 训练生成的文件
 
