@@ -13,7 +13,10 @@ This adapter keeps the official nuScenes dataset implementation untouched and pr
 - Input: four `float32` columns configured as `x, y, z, intensity`
 - The inspected converted data has a zero-valued fourth column; it is not measured intensity or `ring/timestamp`
 - Output contract: 26 company classes; the observed formal annotations contain positive boxes for 24 of them
-- Evaluation: smoke count and recall reporting only, not formal AP/NDS
+- Evaluation: custom 26-class center-distance AP/mAP, emitted-prediction precision/recall,
+  matched-box translation/scale/orientation error and distance-range breakdown
+- The evaluation is not official nuScenes NDS because this model does not output velocity
+  or attributes and the company taxonomy is not the official nuScenes detection taxonomy
 
 Do not use `data/v1.0-trainval`: it references `.pcd` entries without the usable sibling sample directory.
 
@@ -72,6 +75,40 @@ CUDA_VISIBLE_DEVICES=0 python tools/company_nuscenes/smoke_test_formal_voxelnext
 ```
 
 The second command must print `formal_voxelnext_smoke: PASS` before full training is started.
+
+The metric implementation also has a CPU-only synthetic check:
+
+```bash
+python tools/company_nuscenes/smoke_test_company_evaluation.py
+```
+
+## Evaluate Detection Quality
+
+`test.py` now invokes `CompanyNuScenesDataset.evaluation()` to report:
+
+- Per-class `AP` at XY center-distance thresholds `0.5`, `1.0`, `2.0`, and `4.0` meters.
+- `mAP` over validation classes that actually contain retained GT boxes.
+- Precision, recall, and F1 at a `2.0 m` match threshold for the predictions emitted by post-processing.
+- `mATE`, `mASE`, and `mAOE` on matched predictions, measuring center, size, and yaw error;
+  traffic-cone yaw is ignored and barrier yaw is treated as `pi`-periodic.
+- The same summary split into `0-30 m`, `30-50 m`, and `50 m+` distance ranges.
+
+The validation split may legitimately have no GT for some declared classes. Their prediction
+counts are still displayed, but they are excluded from `mAP` because AP is undefined without
+positive examples. Their false positives are included in the emitted-prediction micro precision.
+
+For a saved prediction file, compute metrics without rerunning model inference:
+
+```bash
+python tools/company_nuscenes/evaluate_company_predictions.py \
+  --result output/nuscenes_models/company_voxelnext_26cls_trainval/formal_company_26cls/eval/epoch_20/val/epoch20_score020/result.pkl \
+  --infos data/nuscenes/v1.0-trainval/company_nuscenes_infos_val.pkl
+```
+
+This writes `company_metrics_summary.json` beside `result.pkl`. For useful AP comparison,
+generate predictions with a low model `SCORE_THRESH` so the precision-recall curve is not
+prematurely clipped; use `--min_score` on the saved predictions to inspect deployment
+precision/recall tradeoffs afterward.
 
 ## Train
 

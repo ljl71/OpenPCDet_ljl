@@ -1,9 +1,10 @@
 import copy
+import json
 import pickle
-from collections import Counter
 from pathlib import Path
 
 from ..dataset import DatasetTemplate
+from . import company_nuscenes_eval
 from . import company_nuscenes_utils
 from . import point_io
 
@@ -109,23 +110,40 @@ class CompanyNuScenesDataset(DatasetTemplate):
         return data_dict
 
     def evaluation(self, det_annos, class_names, **kwargs):
-        gt_counter = Counter()
-        pred_counter = Counter()
-        for info in self.infos:
-            gt_counter.update([x for x in info.get('gt_names', []) if x in class_names])
-        for anno in det_annos:
-            pred_counter.update([x for x in anno.get('name', []) if x in class_names])
+        min_lidar_points = self.dataset_cfg.get('FILTER_MIN_POINTS_IN_GT', None)
+        gt_annos, gt_stats = company_nuscenes_eval.build_ground_truth_annos(
+            self.infos, class_names, min_lidar_points=min_lidar_points
+        )
+        company_nuscenes_eval.validate_prediction_alignment(det_annos, self.infos)
+        metrics = company_nuscenes_eval.evaluate_company_predictions(
+            gt_annos=gt_annos,
+            det_annos=det_annos,
+            class_names=class_names,
+            distance_thresholds=self.dataset_cfg.get(
+                'EVAL_DISTANCE_THRESHOLDS', company_nuscenes_eval.DEFAULT_DISTANCE_THRESHOLDS
+            ),
+            tp_distance_threshold=self.dataset_cfg.get(
+                'EVAL_TP_DISTANCE_THRESHOLD', company_nuscenes_eval.DEFAULT_TP_DISTANCE_THRESHOLD
+            ),
+            distance_ranges=self.dataset_cfg.get(
+                'EVAL_DISTANCE_RANGES', company_nuscenes_eval.DEFAULT_DISTANCE_RANGES
+            ),
+            gt_stats=gt_stats,
+        )
 
-        result = ['---------------CompanyNuScenes smoke evaluation---------------']
-        result.append('This first-stage evaluation only reports GT/pred counts; AP is not implemented yet.')
-        details = {}
-        for name in class_names:
-            gt_count = int(gt_counter.get(name, 0))
-            pred_count = int(pred_counter.get(name, 0))
-            result.append(f'{name}: gt={gt_count}, pred={pred_count}')
-            details[f'{name}_gt'] = gt_count
-            details[f'{name}_pred'] = pred_count
-        return '\n'.join(result) + '\n', details
+        output_path = kwargs.get('output_path')
+        if output_path is not None:
+            output_path = Path(output_path)
+            output_path.mkdir(exist_ok=True, parents=True)
+            metric_path = output_path / 'company_metrics_summary.json'
+            with open(metric_path, 'w', encoding='utf-8') as f:
+                json.dump(metrics, f, indent=2, ensure_ascii=True, allow_nan=False)
+            self._log(f'The CompanyNuScenes metrics have been saved to {metric_path}')
+
+        return (
+            company_nuscenes_eval.format_company_results(metrics),
+            company_nuscenes_eval.metrics_to_log_dict(metrics),
+        )
 
 
 def create_company_nuscenes_infos(dataset_cfg, data_path, save_path, version):
