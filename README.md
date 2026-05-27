@@ -1,255 +1,296 @@
-<img src="docs/open_mmlab.png" align="right" width="30%">
-
-# OpenPCDet
-
-`OpenPCDet` is a clear, simple, self-contained open source project for LiDAR-based 3D object detection. 
-
-It is also the official code release of [`[PointRCNN]`](https://arxiv.org/abs/1812.04244), [`[Part-A2-Net]`](https://arxiv.org/abs/1907.03670), [`[PV-RCNN]`](https://arxiv.org/abs/1912.13192), [`[Voxel R-CNN]`](https://arxiv.org/abs/2012.15712), [`[PV-RCNN++]`](https://arxiv.org/abs/2102.00463) and [`[MPPNet]`](https://arxiv.org/abs/2205.05979). 
-
-**Highlights**: 
-* `OpenPCDet` has been updated to `v0.6.0` (Sep. 2022).
-* The codes of PV-RCNN++ has been supported.
-* The codes of MPPNet has been supported. 
-
-## Overview
-- [Changelog](#changelog)
-- [Design Pattern](#openpcdet-design-pattern)
-- [Model Zoo](#model-zoo)
-- [Installation](docs/INSTALL.md)
-- [Quick Demo](docs/DEMO.md)
-- [Getting Started](docs/GETTING_STARTED.md)
-- [Citation](#citation)
-
-
-## Changelog
-[2022-09-02] **NEW:** Update `OpenPCDet` to v0.6.0:
-* Official code release of [MPPNet](https://arxiv.org/abs/2205.05979) for temporal 3D object detection, which supports long-term multi-frame 3D object detection and ranks 1st place on [3D detection learderboard](https://waymo.com/open/challenges/2020/3d-detection) of Waymo Open Dataset on Sept. 2th, 2022. For validation dataset, MPPNet achieves 74.96%, 75.06% and 74.52% for vehicle, pedestrian and cyclist classes in terms of mAPH@Level_2. (see the [guideline](docs/guidelines_of_approaches/mppnet.md) on how to train/test with MPPNet).
-* Support multi-frame training/testing on Waymo Open Dataset (see the [change log](docs/changelog.md) for more details on how to process data).
-* Support to save changing training details (e.g., loss, iter, epoch) to file (previous tqdm progress bar is still supported by using `--use_tqdm_to_record`). Please use `pip install gpustat` if you also want to log the GPU related information.
-* Support to save latest model every 5 mintues, so you can restore the model training from latest status instead of previous epoch.   
-
-[2022-08-22] Added support for [custom dataset tutorial and template](docs/CUSTOM_DATASET_TUTORIAL.md) 
-
-[2022-07-05] Added support for the 3D object detection backbone network [`Focals Conv`](https://openaccess.thecvf.com/content/CVPR2022/papers/Chen_Focal_Sparse_Convolutional_Networks_for_3D_Object_Detection_CVPR_2022_paper.pdf).
-
-[2022-02-12] Added support for using docker. Please refer to the guidance in [./docker](./docker).
-
-[2022-02-07] Added support for Centerpoint models on Nuscenes Dataset.
-
-[2022-01-14] Added support for dynamic pillar voxelization, following the implementation proposed in [H^23D R-CNN](https://arxiv.org/abs/2107.14391) with unique operation and [`torch_scatter`](https://github.com/rusty1s/pytorch_scatter) package.
-
-[2022-01-05] **NEW:** Update `OpenPCDet` to v0.5.2:
-* The code of [PV-RCNN++](https://arxiv.org/abs/2102.00463) has been released to this repo, with higher performance, faster training/inference speed and less memory consumption than PV-RCNN.
-* Add performance of several models trained with full training set of [Waymo Open Dataset](#waymo-open-dataset-baselines).
-* Support Lyft dataset, see the pull request [here](https://github.com/open-mmlab/OpenPCDet/pull/720).
-
-
-[2021-12-09] **NEW:**  Update `OpenPCDet` to v0.5.1:
-* Add PointPillar related baseline configs/results on [Waymo Open Dataset](#waymo-open-dataset-baselines).
-* Support Pandaset dataloader, see the pull request [here](https://github.com/open-mmlab/OpenPCDet/pull/396).
-* Support a set of new augmentations, see the pull request [here](https://github.com/open-mmlab/OpenPCDet/pull/653).
-
-[2021-12-01] **NEW:** `OpenPCDet` v0.5.0 is released with the following features:
-* Improve the performance of all models on [Waymo Open Dataset](#waymo-open-dataset-baselines). Note that you need to re-prepare the training/validation data and ground-truth database of Waymo Open Dataset (see [GETTING_STARTED.md](docs/GETTING_STARTED.md)). 
-* Support anchor-free [CenterHead](pcdet/models/dense_heads/center_head.py), add configs of `CenterPoint` and `PV-RCNN with CenterHead`.
-* Support lastest **PyTorch 1.1~1.10** and **spconv 1.0~2.x**, where **spconv 2.x** should be easy to install with pip and faster than previous version (see the official update of spconv [here](https://github.com/traveller59/spconv)).  
-* Support config [`USE_SHARED_MEMORY`](tools/cfgs/dataset_configs/waymo_dataset.yaml) to use shared memory to potentially speed up the training process in case you suffer from an IO problem.  
-* Support better and faster [visualization script](tools/visual_utils/open3d_vis_utils.py), and you need to install [Open3D](https://github.com/isl-org/Open3D) firstly. 
-
-[2021-06-08] Added support for the voxel-based 3D object detection model [`Voxel R-CNN`](#KITTI-3D-Object-Detection-Baselines).
-
-[2021-05-14] Added support for the monocular 3D object detection model [`CaDDN`](#KITTI-3D-Object-Detection-Baselines).
-
-[2020-11-27] Bugfixed: Please re-prepare the validation infos of Waymo dataset (version 1.2) if you would like to 
-use our provided Waymo evaluation tool (see [PR](https://github.com/open-mmlab/OpenPCDet/pull/383)). 
-Note that you do not need to re-prepare the training data and ground-truth database. 
-
-[2020-11-10] The [Waymo Open Dataset](#waymo-open-dataset-baselines) has been supported with state-of-the-art results. Currently we provide the 
-configs and results of `SECOND`, `PartA2` and `PV-RCNN` on the Waymo Open Dataset, and more models could be easily supported by modifying their dataset configs. 
-
-[2020-08-10] Bugfixed: The provided NuScenes models have been updated to fix the loading bugs. Please redownload it if you need to use the pretrained NuScenes models.
-
-[2020-07-30] `OpenPCDet` v0.3.0 is released with the following features:
-   * The Point-based and Anchor-Free models ([`PointRCNN`](#KITTI-3D-Object-Detection-Baselines), [`PartA2-Free`](#KITTI-3D-Object-Detection-Baselines)) are supported now.
-   * The NuScenes dataset is supported with strong baseline results ([`SECOND-MultiHead (CBGS)`](#NuScenes-3D-Object-Detection-Baselines) and [`PointPillar-MultiHead`](#NuScenes-3D-Object-Detection-Baselines)).
-   * High efficiency than last version, support **PyTorch 1.1~1.7** and **spconv 1.0~1.2** simultaneously.
-   
-[2020-07-17]  Add simple visualization codes and a quick demo to test with custom data. 
-
-[2020-06-24] `OpenPCDet` v0.2.0 is released with pretty new structures to support more models and datasets. 
-
-[2020-03-16] `OpenPCDet` v0.1.0 is released. 
-
-
-## Introduction
-
-
-### What does `OpenPCDet` toolbox do?
-
-Note that we have upgrated `PCDet` from `v0.1` to `v0.2` with pretty new structures to support various datasets and models.
-
-`OpenPCDet` is a general PyTorch-based codebase for 3D object detection from point cloud. 
-It currently supports multiple state-of-the-art 3D object detection methods with highly refactored codes for both one-stage and two-stage 3D detection frameworks.
-
-Based on `OpenPCDet` toolbox, we win the Waymo Open Dataset challenge in [3D Detection](https://waymo.com/open/challenges/3d-detection/), 
-[3D Tracking](https://waymo.com/open/challenges/3d-tracking/), [Domain Adaptation](https://waymo.com/open/challenges/domain-adaptation/) 
-three tracks among all LiDAR-only methods, and the Waymo related models will be released to `OpenPCDet` soon.    
-
-We are actively updating this repo currently, and more datasets and models will be supported soon. 
-Contributions are also welcomed. 
-
-### `OpenPCDet` design pattern
-
-* Data-Model separation with unified point cloud coordinate for easily extending to custom datasets:
-<p align="center">
-  <img src="docs/dataset_vs_model.png" width="95%" height="320">
-</p>
-
-* Unified 3D box definition: (x, y, z, dx, dy, dz, heading).
-
-* Flexible and clear model structure to easily support various 3D detection models: 
-<p align="center">
-  <img src="docs/model_framework.png" width="95%">
-</p>
-
-* Support various models within one framework as: 
-<p align="center">
-  <img src="docs/multiple_models_demo.png" width="95%">
-</p>
-
-
-### Currently Supported Features
-
-- [x] Support both one-stage and two-stage 3D object detection frameworks
-- [x] Support distributed training & testing with multiple GPUs and multiple machines
-- [x] Support multiple heads on different scales to detect different classes
-- [x] Support stacked version set abstraction to encode various number of points in different scenes
-- [x] Support Adaptive Training Sample Selection (ATSS) for target assignment
-- [x] Support RoI-aware point cloud pooling & RoI-grid point cloud pooling
-- [x] Support GPU version 3D IoU calculation and rotated NMS 
-
-
-## Model Zoo
-
-### KITTI 3D Object Detection Baselines
-Selected supported methods are shown in the below table. The results are the 3D detection performance of moderate difficulty on the *val* set of KITTI dataset.
-* All LiDAR-based models are trained with 8 GTX 1080Ti GPUs and are available for download. 
-* The training time is measured with 8 TITAN XP GPUs and PyTorch 1.5.
-
-|                                             | training time | Car@R11 | Pedestrian@R11 | Cyclist@R11  | download | 
-|---------------------------------------------|----------:|:-------:|:-------:|:-------:|:---------:|
-| [PointPillar](tools/cfgs/kitti_models/pointpillar.yaml) |~1.2 hours| 77.28 | 52.29 | 62.68 | [model-18M](https://drive.google.com/file/d/1wMxWTpU1qUoY3DsCH31WJmvJxcjFXKlm/view?usp=sharing) | 
-| [SECOND](tools/cfgs/kitti_models/second.yaml)       |  ~1.7 hours  | 78.62 | 52.98 | 67.15 | [model-20M](https://drive.google.com/file/d/1-01zsPOsqanZQqIIyy7FpNXStL3y4jdR/view?usp=sharing) |
-| [SECOND-IoU](tools/cfgs/kitti_models/second_iou.yaml)       | -  | 79.09 | 55.74 | 71.31 | [model-46M](https://drive.google.com/file/d/1AQkeNs4bxhvhDQ-5sEo_yvQUlfo73lsW/view?usp=sharing) |
-| [PointRCNN](tools/cfgs/kitti_models/pointrcnn.yaml) | ~3 hours | 78.70 | 54.41 | 72.11 | [model-16M](https://drive.google.com/file/d/1BCX9wMn-GYAfSOPpyxf6Iv6fc0qKLSiU/view?usp=sharing)| 
-| [PointRCNN-IoU](tools/cfgs/kitti_models/pointrcnn_iou.yaml) | ~3 hours | 78.75 | 58.32 | 71.34 | [model-16M](https://drive.google.com/file/d/1V0vNZ3lAHpEEt0MlT80eL2f41K2tHm_D/view?usp=sharing)|
-| [Part-A2-Free](tools/cfgs/kitti_models/PartA2_free.yaml)   | ~3.8 hours| 78.72 | 65.99 | 74.29 | [model-226M](https://drive.google.com/file/d/1lcUUxF8mJgZ_e-tZhP1XNQtTBuC-R0zr/view?usp=sharing) |
-| [Part-A2-Anchor](tools/cfgs/kitti_models/PartA2.yaml)    | ~4.3 hours| 79.40 | 60.05 | 69.90 | [model-244M](https://drive.google.com/file/d/10GK1aCkLqxGNeX3lVu8cLZyE0G8002hY/view?usp=sharing) |
-| [PV-RCNN](tools/cfgs/kitti_models/pv_rcnn.yaml) | ~5 hours| 83.61 | 57.90 | 70.47 | [model-50M](https://drive.google.com/file/d/1lIOq4Hxr0W3qsX83ilQv0nk1Cls6KAr-/view?usp=sharing) |
-| [Voxel R-CNN (Car)](tools/cfgs/kitti_models/voxel_rcnn_car.yaml) | ~2.2 hours| 84.54 | - | - | [model-28M](https://drive.google.com/file/d/19_jiAeGLz7V0wNjSJw4cKmMjdm5EW5By/view?usp=sharing) |
-| [Focals Conv - F](tools/cfgs/kitti_models/voxel_rcnn_car_focal_multimodal.yaml) | ~4 hours| 85.66 | - | - | [model-30M](https://drive.google.com/file/d/1u2Vcg7gZPOI-EqrHy7_6fqaibvRt2IjQ/view?usp=sharing) |
-||
-| [CaDDN (Mono)](tools/cfgs/kitti_models/CaDDN.yaml) |~15 hours| 21.38 | 13.02 | 9.76 | [model-774M](https://drive.google.com/file/d/1OQTO2PtXT8GGr35W9m2GZGuqgb6fyU1V/view?usp=sharing) |
-
-### Waymo Open Dataset Baselines
-We provide the setting of [`DATA_CONFIG.SAMPLED_INTERVAL`](tools/cfgs/dataset_configs/waymo_dataset.yaml) on the Waymo Open Dataset (WOD) to subsample partial samples for training and evaluation, 
-so you could also play with WOD by setting a smaller `DATA_CONFIG.SAMPLED_INTERVAL` even if you only have limited GPU resources. 
-
-By default, all models are trained with **a single frame** of **20% data (~32k frames)** of all the training samples on 8 GTX 1080Ti GPUs, and the results of each cell here are mAP/mAPH calculated by the official Waymo evaluation metrics on the **whole** validation set (version 1.2).    
-
-|    Performance@(train with 20\% Data)            | Vec_L1 | Vec_L2 | Ped_L1 | Ped_L2 | Cyc_L1 | Cyc_L2 |  
-|---------------------------------------------|----------:|:-------:|:-------:|:-------:|:-------:|:-------:|
-| [SECOND](tools/cfgs/waymo_models/second.yaml) | 70.96/70.34|62.58/62.02|65.23/54.24	|57.22/47.49|	57.13/55.62 |	54.97/53.53 | 
-| [PointPillar](tools/cfgs/waymo_models/pointpillar_1x.yaml) | 70.43/69.83 |	62.18/61.64 | 66.21/46.32|58.18/40.64|55.26/51.75|53.18/49.80 |
-[CenterPoint-Pillar](tools/cfgs/waymo_models/centerpoint_pillar_1x.yaml)| 70.50/69.96|62.18/61.69|73.11/61.97|65.06/55.00|65.44/63.85|62.98/61.46| 
-[CenterPoint-Dynamic-Pillar](tools/cfgs/waymo_models/centerpoint_dyn_pillar_1x.yaml)| 70.46/69.93|62.06/61.58|73.92/63.35|65.91/56.33|66.24/64.69|63.73/62.24| 
-[CenterPoint](tools/cfgs/waymo_models/centerpoint_without_resnet.yaml)| 71.33/70.76|63.16/62.65|	72.09/65.49	|64.27/58.23|	68.68/67.39	|66.11/64.87|
-| [CenterPoint (ResNet)](tools/cfgs/waymo_models/centerpoint.yaml)|72.76/72.23|64.91/64.42	|74.19/67.96	|66.03/60.34|	71.04/69.79	|68.49/67.28 |
-| [Part-A2-Anchor](tools/cfgs/waymo_models/PartA2.yaml) | 74.66/74.12	|65.82/65.32	|71.71/62.24	|62.46/54.06	|66.53/65.18	|64.05/62.75 |
-| [PV-RCNN (AnchorHead)](tools/cfgs/waymo_models/pv_rcnn.yaml) | 75.41/74.74	|67.44/66.80	|71.98/61.24	|63.70/53.95	|65.88/64.25	|63.39/61.82 | 
-| [PV-RCNN (CenterHead)](tools/cfgs/waymo_models/pv_rcnn_with_centerhead_rpn.yaml) | 75.95/75.43	|68.02/67.54	|75.94/69.40	|67.66/61.62	|70.18/68.98	|67.73/66.57|
-| [Voxel R-CNN (CenterHead)-Dynamic-Voxel](tools/cfgs/waymo_models/voxel_rcnn_with_centerhead_dyn_voxel.yaml) | 76.13/75.66	|68.18/67.74	|78.20/71.98	|69.29/63.59	| 70.75/69.68	|68.25/67.21|
-| [PV-RCNN++](tools/cfgs/waymo_models/pv_rcnn_plusplus.yaml) | 77.82/77.32|	69.07/68.62|	77.99/71.36|	69.92/63.74|	71.80/70.71|	69.31/68.26|
-| [PV-RCNN++ (ResNet)](tools/cfgs/waymo_models/pv_rcnn_plusplus_resnet.yaml) |77.61/77.14|	69.18/68.75|	79.42/73.31|	70.88/65.21|	72.50/71.39|	69.84/68.77|
-
-
-Here we also provide the performance of several models trained on the full training set (refer to the paper of [PV-RCNN++](https://arxiv.org/abs/2102.00463)):
-
-|    Performance@(train with 100\% Data)            | Vec_L1 | Vec_L2 | Ped_L1 | Ped_L2 | Cyc_L1 | Cyc_L2 |  
-|---------------------------------------------|----------:|:-------:|:-------:|:-------:|:-------:|:-------:|
-| [SECOND](tools/cfgs/waymo_models/second.yaml) | 72.27/71.69 | 63.85/63.33 | 68.70/58.18 | 60.72/51.31 | 60.62/59.28 | 58.34/57.05 | 
-| [CenterPoint-Pillar](tools/cfgs/waymo_models/centerpoint_pillar_1x.yaml)| 73.37/72.86 | 65.09/64.62 | 75.35/65.11 | 67.61/58.25 | 67.76/66.22 | 65.25/63.77 | 
-| [Part-A2-Anchor](tools/cfgs/waymo_models/PartA2.yaml) | 77.05/76.51 | 68.47/67.97 | 75.24/66.87 | 66.18/58.62 | 68.60/67.36 | 66.13/64.93 |
-| [PV-RCNN (CenterHead)](tools/cfgs/waymo_models/pv_rcnn_with_centerhead_rpn.yaml) | 78.00/77.50 | 69.43/68.98 | 79.21/73.03 | 70.42/64.72 | 71.46/70.27 | 68.95/67.79 |
-| [PV-RCNN++](tools/cfgs/waymo_models/pv_rcnn_plusplus.yaml) | 79.10/78.63 | 70.34/69.91 | 80.62/74.62 | 71.86/66.30 | 73.49/72.38 | 70.70/69.62 |
-| [PV-RCNN++ (ResNet)](tools/cfgs/waymo_models/pv_rcnn_plusplus_resnet.yaml) | 79.25/78.78 | 70.61/70.18 | 81.83/76.28 | 73.17/68.00 | 73.72/72.66 | 71.21/70.19 |
-| [PV-RCNN++ (ResNet, 2 frames)](tools/cfgs/waymo_models/pv_rcnn_plusplus_resnet_2frames.yaml) | 80.17/79.70 | 72.14/71.70 | 83.48/80.42 | 75.54/72.61 | 74.63/73.75 | 72.35/71.50 |
-| [MPPNet (4 frames)](docs/guidelines_of_approaches/mppnet.md) | 81.54/81.06 | 74.07/73.61 | 84.56/81.94 | 77.20/74.67 | 77.15/76.50 | 75.01/74.38 |
-| [MPPNet (16 frames)](docs/guidelines_of_approaches/mppnet.md) | 82.74/82.28 | 75.41/74.96 | 84.69/82.25 | 77.43/75.06 | 77.28/76.66 | 75.13/74.52 |
-
-
-
-
-
-
-We could not provide the above pretrained models due to [Waymo Dataset License Agreement](https://waymo.com/open/terms/), 
-but you could easily achieve similar performance by training with the default configs.
-
-### NuScenes 3D Object Detection Baselines
-All models are trained with 8 GTX 1080Ti GPUs and are available for download.
-
-|                                             | mATE | mASE | mAOE | mAVE | mAAE | mAP | NDS | download | 
-|---------------------------------------------|----------:|:-------:|:-------:|:-------:|:---------:|:-------:|:-------:|:---------:|
-| [PointPillar-MultiHead](tools/cfgs/nuscenes_models/cbgs_pp_multihead.yaml) | 33.87	| 26.00 | 32.07	| 28.74 | 20.15 | 44.63 | 58.23	 | [model-23M](https://drive.google.com/file/d/1p-501mTWsq0G9RzroTWSXreIMyTUUpBM/view?usp=sharing) | 
-| [SECOND-MultiHead (CBGS)](tools/cfgs/nuscenes_models/cbgs_second_multihead.yaml) | 31.15 |	25.51 |	26.64 | 26.26 | 20.46 | 50.59 | 62.29 | [model-35M](https://drive.google.com/file/d/1bNzcOnE3u9iooBFMk2xK7HqhdeQ_nwTq/view?usp=sharing) |
-| [CenterPoint-PointPillar](tools/cfgs/nuscenes_models/cbgs_dyn_pp_centerpoint.yaml) | 31.13 |	26.04 |	42.92 | 23.90 | 19.14 | 50.03 | 60.70 | [model-23M](https://drive.google.com/file/d/1UvGm6mROMyJzeSRu7OD1leU_YWoAZG7v/view?usp=sharing) |
-| [CenterPoint (voxel_size=0.1)](tools/cfgs/nuscenes_models/cbgs_voxel01_res3d_centerpoint.yaml) | 30.11 |	25.55 |	38.28 | 21.94 | 18.87 | 56.03 | 64.54 | [model-34M](https://drive.google.com/file/d/1Cz-J1c3dw7JAWc25KRG1XQj8yCaOlexQ/view?usp=sharing) |
-| [CenterPoint (voxel_size=0.075)](tools/cfgs/nuscenes_models/cbgs_voxel0075_res3d_centerpoint.yaml) | 28.80 |	25.43 |	37.27 | 21.55 | 18.24 | 59.22 | 66.48 | [model-34M](https://drive.google.com/file/d/1XOHAWm1MPkCKr1gqmc3TWi5AYZgPsgxU/view?usp=sharing) |
-
-
-### Other datasets
-Welcome to support other datasets by submitting pull request. 
-
-## Installation
-
-Please refer to [INSTALL.md](docs/INSTALL.md) for the installation of `OpenPCDet`.
-
-
-## Quick Demo
-Please refer to [DEMO.md](docs/DEMO.md) for a quick demo to test with a pretrained model and 
-visualize the predicted results on your custom data or the original KITTI data.
-
-## Getting Started
-
-Please refer to [GETTING_STARTED.md](docs/GETTING_STARTED.md) to learn more usage about this project.
-
-
-## License
-
-`OpenPCDet` is released under the [Apache 2.0 license](LICENSE).
-
-## Acknowledgement
-`OpenPCDet` is an open source project for LiDAR-based 3D scene perception that supports multiple
-LiDAR-based perception models as shown above. Some parts of `PCDet` are learned from the official released codes of the above supported methods. 
-We would like to thank for their proposed methods and the official implementation.   
-
-We hope that this repo could serve as a strong and flexible codebase to benefit the research community by speeding up the process of reimplementing previous works and/or developing new methods.
-
-
-## Citation 
-If you find this project useful in your research, please consider cite:
-
-
-```
-@misc{openpcdet2020,
-    title={OpenPCDet: An Open-source Toolbox for 3D Object Detection from Point Clouds},
-    author={OpenPCDet Development Team},
-    howpublished = {\url{https://github.com/open-mmlab/OpenPCDet}},
-    year={2020}
-}
+# OpenPCDet_ljl：公司 26 类 LiDAR 3D 检测项目
+
+> 基于 [OpenPCDet](https://github.com/open-mmlab/OpenPCDet) 的公司 nuScenes 风格数据适配工程。
+> 当前推荐分支：`codex/company-26cls-evaluation-plus`
+> 目标任务：使用公司正式数据训练和评估 26 类 `VoxelNeXt` LiDAR 3D 检测模型。
+
+本仓库不再只是原版 OpenPCDet 示例工程。本项目已完成公司正式数据读取、26 类标签映射、scene-level 数据划分、VoxelNeXt 训练和测试、BEV 可视化，并在 `plus` 分支新增了可用于判断检测质量的 26 类评估指标。
+
+## 项目概览
+
+| 项目项 | 当前实现 |
+|---|---|
+| 检测模型 | `VoxelNeXt` |
+| 数据集类 | `CompanyNuScenesDataset` |
+| 类别数 | 公司定义的 26 类 |
+| 数据格式 | nuScenes 风格 JSON + `samples/LIDAR_TOP/*.bin` |
+| 输入方式 | LiDAR-only，单帧，`MAX_SWEEPS=1` |
+| 点云输入 | 每点 4 个 `float32`：`x, y, z, intensity` |
+| 正式模型配置 | `tools/cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml` |
+| 正式数据配置 | `tools/cfgs/dataset_configs/company_nuscenes_trainval_dataset.yaml` |
+| 训练实验名 | `formal_company_26cls` |
+| 已完成训练 | `20 epoch`，最终模型 `checkpoint_epoch_20.pth` |
+| 推荐展示阈值 | `SCORE_THRESH=0.2` |
+| 当前评估 | 自定义 26 类中心距离 `AP/mAP`、`precision/recall/F1`、匹配框误差、距离分段结果 |
+
+说明：已经核验的正式 `.bin` 点云第 4 列是转换生成的零占位值，并不是真实反射强度、`ring` 或时间戳。当前标注表声明 26 类，但正式 annotation 中实际具有正样本的类别为 24 类。
+
+## 服务器与容器约定
+
+完整实验记录以 [OpenPCDet_ljl_company_26cls_project_readme.md](OpenPCDet_ljl_company_26cls_project_readme.md) 为主。记录中的部署环境为：
+
+| 项目 | 路径或名称 |
+|---|---|
+| 宿主机工程目录 | `/home/ubuntu/WXY/OpenPCDet_ljl` |
+| 容器工程目录 | `/workspace/OpenPCDet` |
+| 数据挂载 | `/home/ubuntu/WXY/data -> /workspace/OpenPCDet/data` |
+| 工程挂载 | `/home/ubuntu/WXY/OpenPCDet_ljl -> /workspace/OpenPCDet` |
+| Docker 容器名 | `detection3d_v5` |
+| 已验证 GPU | RTX 3090，训练时主要使用 `CUDA_VISIBLE_DEVICES=1` |
+
+## 本分支新增内容
+
+`codex/company-26cls-evaluation-plus` 在已跑通的正式训练版本上增加了检测质量评估能力：
+
+- 每类 `AP@0.5m`、`AP@1.0m`、`AP@2.0m`、`AP@4.0m`。
+- 对验证集中存在有效 GT 的类别计算整体 `mAP`。
+- 在 `2.0m` 匹配条件下报告输出预测的 `precision`、`recall` 和 `F1`。
+- 对匹配成功的框报告 `mATE`（中心误差）、`mASE`（尺寸误差）和 `mAOE`（方向误差）。
+- 报告 `0-30m`、`30-50m`、`50m+` 三个距离区间的结果。
+- 支持对已有 `result.pkl` 离线重算指标，无需重新运行模型推理。
+
+这套指标适合比较当前公司 26 类模型的检测效果和阈值取舍，但**不是官方 nuScenes NDS**：本项目类别体系不是官方 10 类，并且当前模型不输出 NDS 所需要的速度与属性项。
+
+## 数据与流程
+
+正式数据使用以下目录结构：
+
+```text
+data/nuscenes/
+|-- samples/
+|   `-- LIDAR_TOP/
+|       `-- *.bin
+`-- v1.0-trainval/
+    |-- category.json
+    |-- instance.json
+    |-- sample.json
+    |-- sample_data.json
+    |-- sample_annotation.json
+    |-- scene.json
+    |-- calibrated_sensor.json
+    |-- ego_pose.json
+    |-- ImageSets/
+    |   |-- train.txt
+    |   `-- val.txt
+    |-- company_nuscenes_infos_train.pkl
+    `-- company_nuscenes_infos_val.pkl
 ```
 
-## Contribution
-Welcome to be a member of the OpenPCDet development team by contributing to this repo, and feel free to contact us for any potential contributions. 
+不要使用 `data/v1.0-trainval` 作为本轮正式训练入口；已有检查表明该早期目录仍可能引用无法闭环读取的 `.pcd` 路径。
 
+整体处理流程如下：
 
+```text
+公司 JSON + LiDAR bin
+        -> CompanyNuScenesDataset / company_nuscenes_utils.py
+        -> scene-level train/val split + info pkl
+        -> VoxelNeXt 26 类训练
+        -> checkpoint_epoch_*.pth
+        -> test.py 推理生成 result.pkl
+        -> AP/mAP + P/R + 误差分析 + BEV 可视化
+```
+
+## 关键代码
+
+| 路径 | 作用 |
+|---|---|
+| `pcdet/datasets/company_nuscenes/company_nuscenes_dataset.py` | 公司数据加载与评估入口 |
+| `pcdet/datasets/company_nuscenes/company_nuscenes_utils.py` | 类别映射、JSON 解析、info 生成与划分 |
+| `pcdet/datasets/company_nuscenes/company_nuscenes_eval.py` | `plus` 分支新增的 26 类评估实现 |
+| `pcdet/datasets/company_nuscenes/point_io.py` | 正式点云格式读取 |
+| `pcdet/models/dense_heads/voxelnext_head.py` | 26 类 multi-head 检测头相关逻辑 |
+| `tools/company_nuscenes/create_company_infos.py` | 生成正式训练/验证 info |
+| `tools/company_nuscenes/check_company_infos.py` | 检查 info、点云路径和类别覆盖 |
+| `tools/company_nuscenes/evaluate_company_predictions.py` | 离线评估已有预测结果 |
+| `tools/company_nuscenes/visualize_score020_bev.py` | BEV 可视化 |
+
+## 快速开始
+
+以下命令以服务器容器内工程目录 `/workspace/OpenPCDet` 为例。
+
+### 1. 预览划分并生成 info
+
+```bash
+cd /workspace/OpenPCDet
+
+python tools/company_nuscenes/preview_formal_split.py \
+  --data_path data/nuscenes \
+  --version v1.0-trainval \
+  --train_ratio 0.8 \
+  --seed 0 \
+  --min_lidar_points 1
+
+python tools/company_nuscenes/create_company_infos.py \
+  --data_path data/nuscenes \
+  --save_path data/nuscenes \
+  --version v1.0-trainval \
+  --max_sweeps 1 \
+  --train_ratio 0.8 \
+  --seed 0 \
+  --min_lidar_points 1
+
+python tools/company_nuscenes/check_company_infos.py \
+  --root data/nuscenes/v1.0-trainval \
+  --data_root data/nuscenes \
+  --strict \
+  --min_lidar_points 1
+```
+
+### 2. 训练前 smoke test
+
+```bash
+python tools/company_nuscenes/smoke_test_company_dataloader.py \
+  --cfg_file tools/cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml
+
+CUDA_VISIBLE_DEVICES=0 python tools/company_nuscenes/smoke_test_formal_voxelnext.py \
+  --cfg_file tools/cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml \
+  --workers 0
+
+python tools/company_nuscenes/smoke_test_company_evaluation.py
+```
+
+最后一个命令为 `plus` 分支新增的 CPU 评估逻辑自检，成功时打印：
+
+```text
+company_evaluation_smoke: PASS
+```
+
+### 3. 训练 VoxelNeXt
+
+已有的 `formal_company_26cls` 完整训练产物来自 `batch_size=1, workers=4`。首次确认新环境链路时仍可使用这一保守参数；在已验证的 RTX 3090 环境中，后续正式训练推荐使用 `batch_size=8, workers=4`，并以新的 experiment tag 保存结果。
+
+```bash
+cd /workspace/OpenPCDet/tools
+
+CUDA_VISIBLE_DEVICES=1 python train.py \
+  --cfg_file cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml \
+  --batch_size 8 \
+  --epochs 20 \
+  --workers 4 \
+  --extra_tag formal_company_26cls_bs8
+```
+
+该推荐重训命令的输出目录：
+
+```text
+output/nuscenes_models/company_voxelnext_26cls_trainval/formal_company_26cls_bs8/
+```
+
+### 4. 测试 checkpoint 并输出评估指标
+
+下面命令测试文档中已经完成的 `batch_size=1` / `formal_company_26cls` 第 20 轮模型：
+
+```bash
+cd /workspace/OpenPCDet/tools
+
+CUDA_VISIBLE_DEVICES=1 python test.py \
+  --cfg_file cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml \
+  --ckpt ../output/nuscenes_models/company_voxelnext_26cls_trainval/formal_company_26cls/ckpt/checkpoint_epoch_20.pth \
+  --batch_size 1 \
+  --workers 4 \
+  --extra_tag formal_company_26cls \
+  --eval_tag epoch20_score020 \
+  --set MODEL.DENSE_HEAD.POST_PROCESSING.SCORE_THRESH 0.2
+```
+
+测试时 `CompanyNuScenesDataset.evaluation()` 会打印每类 AP、整体 mAP、P/R/F1 和距离分段指标，同时在结果目录写出：
+
+```text
+company_metrics_summary.json
+result.pkl
+```
+
+### 5. 对已有预测离线计算指标
+
+服务器上已存在 `result.pkl` 时，不需要重新推理：
+
+```bash
+cd /workspace/OpenPCDet
+
+python tools/company_nuscenes/evaluate_company_predictions.py \
+  --result output/nuscenes_models/company_voxelnext_26cls_trainval/formal_company_26cls/eval/epoch_20/val/epoch20_score020/result.pkl \
+  --infos data/nuscenes/v1.0-trainval/company_nuscenes_infos_val.pkl
+```
+
+比较模型本身的 AP 时，建议先以较低的推理 `SCORE_THRESH` 生成预测，保留更完整的 PR 曲线；`SCORE_THRESH=0.2` 更适合当前可视化和实际输出数量的平衡观察。
+
+### 6. 生成 BEV 可视化
+
+使用文档中推荐的 `SCORE_THRESH=0.2` 预测结果抽样查看 GT 与预测框：
+
+```bash
+cd /workspace/OpenPCDet
+
+python tools/company_nuscenes/visualize_score020_bev.py \
+  --result output/nuscenes_models/company_voxelnext_26cls_trainval/formal_company_26cls/eval/epoch_20/val/epoch20_score020/result.pkl \
+  --infos data/nuscenes/v1.0-trainval/company_nuscenes_infos_val.pkl \
+  --data_root data/nuscenes \
+  --out_dir output/nuscenes_models/company_voxelnext_26cls_trainval/formal_company_26cls/vis/epoch20_score020_bev \
+  --score_thresh 0.2 \
+  --num 20
+```
+
+可视化中绿色框为 GT，红色框为预测；输出目录包含 `bev_idx_*.png` 和 `summary.txt`。
+
+## 已验证状态
+
+2026 年 5 月 26 日的正式数据检查和训练记录：
+
+| 项目 | 结果 |
+|---|---:|
+| scene 总数 | 412 |
+| sample 总数 | 24,142 |
+| LIDAR_TOP 文件 | 24,142 |
+| train scenes / samples | 329 / 19,268 |
+| val scenes / samples | 83 / 4,874 |
+| 按 `num_lidar_pts >= 1` 或未知点数保留的框 | 895,317 |
+| 实际有有效标注的类别 | 24 / 26 |
+| 已完成训练 | 20 epoch |
+| 最终 checkpoint | `checkpoint_epoch_20.pth` |
+
+在尚未加入本分支评估模块前，已有模型测试记录如下。这些数值是 recall 和输出数量分析，不是 mAP；现在可使用离线评估工具对对应 `result.pkl` 补算本分支指标。
+
+| `SCORE_THRESH` | `recall@0.3` | `recall@0.5` | `recall@0.7` | 平均预测数/帧 | 用途判断 |
+|---:|---:|---:|---:|---:|---|
+| `0.10` | 0.724822 | 0.517463 | 0.222161 | 103.799 | 召回较高，误检风险偏大 |
+| `0.20` | 0.657681 | 0.495375 | 0.220149 | 45.709 | 当前推荐的平衡阈值 |
+| `0.25` | 0.624331 | 0.481173 | 0.218387 | 36.444 | 更保守，弱类可能被压制 |
+
+## 已有产物位置
+
+文档记录的已完成实验产物位于容器内下列目录：
+
+| 产物 | 路径 |
+|---|---|
+| 训练 info | `/workspace/OpenPCDet/data/nuscenes/v1.0-trainval/company_nuscenes_infos_train.pkl` |
+| 验证 info | `/workspace/OpenPCDet/data/nuscenes/v1.0-trainval/company_nuscenes_infos_val.pkl` |
+| 最终 checkpoint | `/workspace/OpenPCDet/output/nuscenes_models/company_voxelnext_26cls_trainval/formal_company_26cls/ckpt/checkpoint_epoch_20.pth` |
+| `SCORE_THRESH=0.2` 预测 | `/workspace/OpenPCDet/output/nuscenes_models/company_voxelnext_26cls_trainval/formal_company_26cls/eval/epoch_20/val/epoch20_score020/result.pkl` |
+| BEV 图片 | `/workspace/OpenPCDet/output/nuscenes_models/company_voxelnext_26cls_trainval/formal_company_26cls/vis/epoch20_score020_bev/` |
+
+这些训练产物、预测文件和图片不提交进 Git 仓库；本仓库保存的是产生与分析它们的代码、配置和说明文档。
+
+## 文档导航
+
+| 文档 | 内容 |
+|---|---|
+| [tools/company_nuscenes/README.md](tools/company_nuscenes/README.md) | 当前代码入口、正式 info、训练与 `plus` 评估说明 |
+| [OpenPCDet_ljl_company_26cls_project_readme.md](OpenPCDet_ljl_company_26cls_project_readme.md) | 本首页主要依据：正式部署、训练、测试、阈值分析和可视化的完整实验记录 |
+| [VoxelNeXt_26类_公司正式数据集正确跑通指南.md](VoxelNeXt_26类_公司正式数据集正确跑通指南.md) | 正式数据训练的逐步操作指南 |
+| [OpenPCDet_ljl_26cls_VoxelNeXt_runbook_with_why.md](OpenPCDet_ljl_26cls_VoxelNeXt_runbook_with_why.md) | 带原因解释的运行手册与排障记录 |
+| [OpenPCDet_ljl_26cls_training_outputs_summary_updated_with_vis.md](OpenPCDet_ljl_26cls_training_outputs_summary_updated_with_vis.md) | 训练产物、测试结果和 BEV 输出整理 |
+| [COMPANY_NUSCENES_26CLS_GUIDE.md](COMPANY_NUSCENES_26CLS_GUIDE.md) | 公司 26 类数据、配置和自动标注总体说明 |
+| [SERVER_RUN_GUIDE.md](SERVER_RUN_GUIDE.md) | 服务器环境部署与常见问题 |
+| [README.zh-CN.md](README.zh-CN.md) | 上游 OpenPCDet 中文介绍 |
+
+其中部分早期实验文档保留了“evaluation 仍为 smoke/count”的历史记录；在本 `plus` 分支中，以本首页和 `tools/company_nuscenes/README.md` 中的新增评估说明为准。
+
+## 说明与致谢
+
+本项目是在 OpenPCDet 的基础上为公司 26 类 nuScenes 风格 LiDAR 数据开发的适配与实验分支。OpenPCDet 原始模型、框架说明、安装文档及引用信息请参见：
+
+- [OpenPCDet 官方仓库](https://github.com/open-mmlab/OpenPCDet)
+- [上游中文 README](README.zh-CN.md)
+- [安装说明](docs/INSTALL.md)
+
+使用或发布基于本仓库的模型与代码时，请同时遵循 OpenPCDet 原项目的许可证与引用要求。
