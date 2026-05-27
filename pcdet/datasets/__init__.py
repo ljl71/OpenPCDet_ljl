@@ -12,7 +12,12 @@ from .waymo.waymo_dataset import WaymoDataset
 from .pandaset.pandaset_dataset import PandasetDataset
 from .lyft.lyft_dataset import LyftDataset
 from .once.once_dataset import ONCEDataset
-from .argo2.argo2_dataset import Argo2Dataset
+try:
+    from .argo2.argo2_dataset import Argo2Dataset
+except ModuleNotFoundError as err:
+    if err.name != 'av2':
+        raise
+    Argo2Dataset = None
 from .waymo.molar_dataset import molarDataset
 from .company_nuscenes.company_nuscenes_dataset import CompanyNuScenesDataset
 

@@ -109,15 +109,16 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
                 for key, val in tb_dict.items():
                     tb_log.add_scalar('train/' + key, val, accumulated_iter)
             
-            # save intermediate ckpt every {ckpt_save_time_interval} seconds         
-            time_past_this_epoch = pbar.format_dict['elapsed']
-            if time_past_this_epoch // ckpt_save_time_interval >= ckpt_save_cnt:
-                ckpt_name = ckpt_save_dir / 'latest_model'
-                save_checkpoint(
-                    checkpoint_state(model, optimizer, cur_epoch, accumulated_iter), filename=ckpt_name,
-                )
-                logger.info(f'Save latest model to {ckpt_name}')
-                ckpt_save_cnt += 1
+            # Save an intermediate checkpoint only when timed saving is enabled.
+            if ckpt_save_time_interval is not None:
+                time_past_this_epoch = pbar.format_dict['elapsed']
+                if time_past_this_epoch // ckpt_save_time_interval >= ckpt_save_cnt:
+                    ckpt_name = ckpt_save_dir / 'latest_model'
+                    save_checkpoint(
+                        checkpoint_state(model, optimizer, cur_epoch, accumulated_iter), filename=ckpt_name,
+                    )
+                    logger.info(f'Save latest model to {ckpt_name}')
+                    ckpt_save_cnt += 1
                 
     if rank == 0:
         pbar.close()
