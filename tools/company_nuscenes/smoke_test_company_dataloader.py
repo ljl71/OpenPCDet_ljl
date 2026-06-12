@@ -13,6 +13,8 @@ def main():
         type=Path,
         default=repo_root / 'tools' / 'cfgs' / 'nuscenes_models' / 'company_voxelnext_26cls_trainval.yaml'
     )
+    parser.add_argument('--data_path', type=str, default=None, help='override DATA_CONFIG.DATA_PATH')
+    parser.add_argument('--version', type=str, default=None, help='override DATA_CONFIG.VERSION')
     args = parser.parse_args()
 
     sys.path.insert(0, str(repo_root))
@@ -23,6 +25,10 @@ def main():
     from pcdet.utils import common_utils
 
     cfg_from_yaml_file(str(args.cfg_file), cfg)
+    if args.data_path is not None:
+        cfg.DATA_CONFIG.DATA_PATH = args.data_path
+    if args.version is not None:
+        cfg.DATA_CONFIG.VERSION = args.version
     logger = common_utils.create_logger()
     dataset, dataloader, _ = build_dataloader(
         dataset_cfg=cfg.DATA_CONFIG,

@@ -1,14 +1,12 @@
 DATASET: 'CompanyNuScenesDataset'
-DATA_PATH: '../data/nuscenes'
+DATA_PATH: '../data/NuScenes-develop_t23_2026'
 
-# Company formal data mounted in the container:
-# data/nuscenes/v1.0-trainval/*.json and data/nuscenes/samples/LIDAR_TOP/*.bin
-# The converted bin is four float32 values per point. In the inspected pair,
-# its fourth column is a converter placeholder rather than source PCD intensity.
-VERSION: 'v1.0-trainval'
+# T23 2026 nuScenes-like data:
+# DATA_PATH/v1.0-develop/*.json and DATA_PATH/samples/<date>/<scene>/lidar_fusion/*.pcd
+VERSION: 'v1.0-develop'
 MAX_SWEEPS: 1
 LIDAR_POINT_DIM: 4
-LIDAR_POINT_FORMAT: float32
+LIDAR_POINT_FORMAT: pcd
 LIDAR_POINT_FIELDS: ['x', 'y', 'z', 'intensity']
 PRED_VELOCITY: False
 FILTER_MIN_POINTS_IN_GT: 1

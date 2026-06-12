@@ -1,10 +1,12 @@
 import argparse
 import importlib.util
+import os
 import pickle
 from collections import Counter
 from pathlib import Path
 
 import numpy as np
+import yaml
 
 
 def load_default_class_names(repo_root):
@@ -13,6 +15,46 @@ def load_default_class_names(repo_root):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.COMPANY_26_CLASS_NAMES
+
+
+def load_cfg(repo_root, cfg_file):
+    cfg_file = cfg_file if cfg_file.is_absolute() else repo_root / cfg_file
+    old_cwd = Path.cwd()
+    try:
+        os.chdir(repo_root / 'tools')
+        cfg = {}
+        merge_yaml_config(cfg, load_yaml(cfg_file), repo_root)
+    finally:
+        os.chdir(old_cwd)
+    return cfg
+
+
+def load_yaml(path):
+    with open(path, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)
+
+
+def merge_yaml_config(config, new_config, repo_root):
+    if '_BASE_CONFIG_' in new_config:
+        base_path = Path(new_config['_BASE_CONFIG_'])
+        base_path = base_path if base_path.is_absolute() else repo_root / 'tools' / base_path
+        merge_yaml_config(config, load_yaml(base_path), repo_root)
+
+    for key, val in new_config.items():
+        if key == '_BASE_CONFIG_':
+            config[key] = val
+            continue
+        if isinstance(val, dict):
+            config.setdefault(key, {})
+            merge_yaml_config(config[key], val, repo_root)
+        else:
+            config[key] = val
+    return config
+
+
+def resolve_data_path(repo_root, data_path):
+    data_path = Path(data_path)
+    return data_path if data_path.is_absolute() else repo_root / 'tools' / data_path
 
 
 def find_lidar_path(root, data_root, lidar_path):
@@ -82,6 +124,10 @@ def main():
     parser = argparse.ArgumentParser(description='Check CompanyNuScenes info files')
     parser.add_argument('--root', type=Path, default=repo_root / 'data' / 'nuscenes' / 'v1.0-trainval')
     parser.add_argument(
+        '--cfg_file', type=Path, default=None,
+        help='optional model config; fills root, class names and min-points filter from DATA_CONFIG'
+    )
+    parser.add_argument(
         '--data_root', type=Path, default=None,
         help='data root containing samples/; defaults to the parent directory of --root'
     )
@@ -96,6 +142,18 @@ def main():
         help='mirror FILTER_MIN_POINTS_IN_GT when checking retained training boxes'
     )
     args = parser.parse_args()
+
+    if args.cfg_file is not None:
+        cfg = load_cfg(repo_root, args.cfg_file)
+        data_cfg = cfg['DATA_CONFIG']
+        data_root_from_cfg = resolve_data_path(repo_root, data_cfg['DATA_PATH'])
+        args.root = data_root_from_cfg / data_cfg['VERSION']
+        if args.data_root is None:
+            args.data_root = data_root_from_cfg
+        if args.class_names is None:
+            args.class_names = list(cfg['CLASS_NAMES'])
+        args.min_lidar_points = int(data_cfg.get('FILTER_MIN_POINTS_IN_GT', args.min_lidar_points))
+
     data_root = args.data_root or args.root.parent
     class_names = args.class_names or load_default_class_names(repo_root)
 

@@ -14,9 +14,9 @@ def load_utils(repo_root):
 def main():
     repo_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description='Create CompanyNuScenes info files without importing torch/pcdet.')
-    parser.add_argument('--data_path', type=Path, default=repo_root / 'data' / 'nuscenes')
-    parser.add_argument('--save_path', type=Path, default=repo_root / 'data' / 'nuscenes')
-    parser.add_argument('--version', type=str, default='v1.0-trainval')
+    parser.add_argument('--data_path', type=Path, default=repo_root / 'data' / 'NuScenes-develop_t23_2026')
+    parser.add_argument('--save_path', type=Path, default=repo_root / 'data' / 'NuScenes-develop_t23_2026')
+    parser.add_argument('--version', type=str, default='v1.0-develop')
     parser.add_argument('--max_sweeps', type=int, default=1)
     parser.add_argument('--train_ratio', type=float, default=0.8)
     parser.add_argument('--seed', type=int, default=0)
