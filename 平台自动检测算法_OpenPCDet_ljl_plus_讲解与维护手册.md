@@ -1633,3 +1633,565 @@ OpenPCDet_ljl_plus 代码已按 T23 v1.0-develop、PCD 点云、原 26 类完成
 接手人需要先重建 detection3d_v5_plus，并把 T23 数据挂载到 /workspace/OpenPCDet/data/NuScenes-develop_t23_2026；
 之后按 create infos -> check infos -> dataloader smoke -> VoxelNeXt smoke -> train -> 部署 FastAPI 的顺序恢复 plus 支路。
 ```
+
+---
+
+## 22. 2026-06-22 实际恢复操作记录：代码覆盖、容器重建与数据加载验证
+
+本节记录的是 2026-06-22 在服务器上实际已经完成的操作。与第 21 节相比，本节不是“计划步骤”，而是现场已经执行并验证过的状态，方便后续接手人判断当前进度。
+
+### 22.1 当前已完成结论
+
+截至本次记录，已经完成：
+
+```text
+1. 已从 GitHub 拉取 codex/company-26cls-evaluation-plus 分支；
+2. 已把新代码覆盖到 /home/ubuntu/WXY/OpenPCDet_ljl_plus；
+3. 旧代码已备份为 /home/ubuntu/WXY/OpenPCDet_ljl_plus_bak_20260622_135434；
+4. 已用 pcdet_back_3dv2:20260520 镜像重建 detection3d_v5_plus 容器；
+5. 已把 T23 数据集挂载到容器内 /workspace/OpenPCDet/data/NuScenes-develop_t23_2026；
+6. 已重新生成 T23 的 company_nuscenes_infos_train.pkl 和 company_nuscenes_infos_val.pkl；
+7. 已修复 check_company_infos.py 的 retained_mask 空数组索引问题；
+8. 已通过 check_company_infos.py --strict 检查；
+9. 已补充 pcdet/version.py，解决 pcdet.version 缺失问题；
+10. 已重新编译 OpenPCDet CUDA/C++ 扩展；
+11. 已通过 dataloader smoke test；
+12. 当前下一步应继续跑 VoxelNeXt 单 batch 前向/反向 smoke test。
+```
+
+当前还没有完成：
+
+```text
+1. 尚未完成 VoxelNeXt 模型 smoke test；
+2. 尚未正式启动训练；
+3. 尚未生成新 checkpoint；
+4. 尚未把新 checkpoint 接入 FastAPI；
+5. 尚未重新验证 ai-nginx / main-server / 前端 AI 标注完整链路。
+```
+
+### 22.2 GitHub 分支拉取记录
+
+在宿主机执行：
+
+```bash
+cd ~/WXY && git clone -b codex/company-26cls-evaluation-plus https://github.com/ljl71/OpenPCDet_ljl.git OpenPCDet_ljl_company26_test && cd OpenPCDet_ljl_company26_test && git branch --show-current && git log --oneline -5
+```
+
+实际输出确认：
+
+```text
+codex/company-26cls-evaluation-plus
+e016ced Merge remote-tracking branch 'origin/codex/company-26cls-evaluation-plus' into codex/company-26cls-evaluation-plus
+4576b09 Adapt CompanyNuScenes to T23 2026 dataset
+ac1e618 Adapt CompanyNuScenes to T23 2026 dataset
+a177702 docs: add plus deployment runbooks
+aec52d7 docs: add Chinese project homepage for company 26-class workflow
+```
+
+说明：
+
+```text
+新拉取的分支已经包含 T23 2026 数据集适配提交。
+```
+
+### 22.3 覆盖 OpenPCDet_ljl_plus 前的备份
+
+用户希望直接用新代码覆盖原来的：
+
+```text
+/home/ubuntu/WXY/OpenPCDet_ljl_plus
+```
+
+因此执行了备份和替换：
+
+```bash
+cd ~/WXY && TS=$(date +%Y%m%d_%H%M%S) && sudo docker ps -a --format '{{.Names}}' | grep -qx detection3d_v5_plus && sudo docker stop detection3d_v5_plus >/dev/null 2>&1 && sudo docker rename detection3d_v5_plus detection3d_v5_plus_old_$TS || true; cd ~/WXY && mv OpenPCDet_ljl_plus OpenPCDet_ljl_plus_bak_$TS && mv OpenPCDet_ljl_company26_test OpenPCDet_ljl_plus && cd OpenPCDet_ljl_plus && git branch --show-current && git log --oneline -5 && echo "旧代码已备份到: ~/WXY/OpenPCDet_ljl_plus_bak_$TS"
+```
+
+实际备份结果：
+
+```text
+旧代码已备份到: ~/WXY/OpenPCDet_ljl_plus_bak_20260622_135434
+```
+
+检查目录：
+
+```bash
+cd ~/WXY && ls -ld OpenPCDet_ljl_plus OpenPCDet_ljl_plus_bak_* | tail
+```
+
+实际确认：
+
+```text
+OpenPCDet_ljl_plus
+OpenPCDet_ljl_plus_bak_20260622_135434
+```
+
+### 22.4 宿主机代码、数据和镜像检查
+
+执行：
+
+```bash
+cd ~/WXY && echo "代码:" && ls -ld OpenPCDet_ljl_plus && echo "数据:" && ls -ld data_ljl/NuScenes-develop_t23_2026 && echo "镜像:" && sudo docker images | grep -E "pcdet_back_3dv2|pcdet|detection"
+```
+
+实际确认：
+
+```text
+代码目录存在：
+/home/ubuntu/WXY/OpenPCDet_ljl_plus
+
+数据目录存在：
+/home/ubuntu/WXY/data_ljl/NuScenes-develop_t23_2026
+
+关键镜像存在：
+pcdet_back_3dv2:20260520
+```
+
+说明：
+
+```text
+后续可以继续使用 pcdet_back_3dv2:20260520 重建 detection3d_v5_plus 容器。
+```
+
+### 22.5 重建 detection3d_v5_plus 容器
+
+执行：
+
+```bash
+cd ~/WXY && TS=$(date +%Y%m%d_%H%M%S) && if sudo docker ps -a --format '{{.Names}}' | grep -qx detection3d_v5_plus; then sudo docker stop detection3d_v5_plus >/dev/null 2>&1 || true; sudo docker rename detection3d_v5_plus detection3d_v5_plus_old_$TS; fi && sudo docker run -it -d --gpus all --name detection3d_v5_plus -v /home/ubuntu/WXY/OpenPCDet_ljl_plus:/workspace/OpenPCDet -v /home/ubuntu/WXY/data_ljl/NuScenes-develop_t23_2026:/workspace/OpenPCDet/data/NuScenes-develop_t23_2026 pcdet_back_3dv2:20260520 /bin/bash
+```
+
+检查：
+
+```bash
+sudo docker ps | grep detection3d_v5_plus
+```
+
+实际确认：
+
+```text
+2f48ef9df547   pcdet_back_3dv2:20260520   "/bin/bash"   Up   detection3d_v5_plus
+```
+
+进入容器：
+
+```bash
+sudo docker exec -u root -it detection3d_v5_plus /bin/bash
+```
+
+进入后路径为：
+
+```text
+/workspace/OpenPCDet
+```
+
+### 22.6 容器内代码与数据路径检查
+
+由于容器里的 Git 版本较老，不支持：
+
+```bash
+git branch --show-current
+```
+
+因此使用兼容命令检查：
+
+```bash
+cd /workspace/OpenPCDet && echo "分支:" && (git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null || true) && echo "提交:" && git log --oneline -3 && echo "数据目录:" && ls -ld data/NuScenes-develop_t23_2026 && echo "v1.0-develop:" && ls data/NuScenes-develop_t23_2026/v1.0-develop | head && echo "samples:" && ls data/NuScenes-develop_t23_2026/samples | head
+```
+
+实际确认：
+
+```text
+分支:
+codex/company-26cls-evaluation-plus
+
+提交:
+e016ced Merge remote-tracking branch 'origin/codex/company-26cls-evaluation-plus' into codex/company-26cls-evaluation-plus
+4576b09 Adapt CompanyNuScenes to T23 2026 dataset
+ac1e618 Adapt CompanyNuScenes to T23 2026 dataset
+
+数据目录:
+data/NuScenes-develop_t23_2026
+
+v1.0-develop 中可见：
+ImageSets
+attribute.json
+calibrated_sensor.json
+category.json
+company_nuscenes_10cls_infos_train.pkl
+company_nuscenes_10cls_infos_val.pkl
+company_nuscenes_infos_train.pkl
+company_nuscenes_infos_val.pkl
+ego_pose.json
+instance.json
+
+samples 中可见：
+2026-01-09
+2026-01-10
+2026-01-22
+2026-01-23
+2026-02-03
+2026-03-04
+2026-03-05
+```
+
+说明：
+
+```text
+代码挂载成功；
+T23 数据集挂载成功；
+容器内训练路径与配置路径闭环。
+```
+
+### 22.7 重新生成 T23 company infos
+
+在容器内执行：
+
+```bash
+cd /workspace/OpenPCDet && python tools/company_nuscenes/create_company_infos.py --data_path data/NuScenes-develop_t23_2026 --save_path data/NuScenes-develop_t23_2026 --version v1.0-develop --max_sweeps 1 --min_lidar_points 1
+```
+
+实际结果：
+
+```text
+Company nuScenes train infos: 53645
+Company nuScenes val infos: 13511
+Saved: data/NuScenes-develop_t23_2026/v1.0-develop/company_nuscenes_infos_train.pkl
+Saved: data/NuScenes-develop_t23_2026/v1.0-develop/company_nuscenes_infos_val.pkl
+```
+
+主要类别计数中，样本量较大的类别包括：
+
+```text
+vehicle_car: 1780899
+vehicle_motorcycle: 502176
+human_pedestrian_adult: 462854
+vehicle_truck: 118003
+vehicle_bicycle: 115000
+movable_object_trafficcone: 111709
+vehicle_tricycle: 91160
+vehicle_bus_rigid: 43994
+movable_object_barrier: 36579
+```
+
+说明：
+
+```text
+T23 v1.0-develop 数据集可以被 create_company_infos.py 正常解析；
+train/val info 已重新生成；
+当前仍使用原 26 类配置，但实际数据中不是每一类都有样本。
+```
+
+### 22.8 修复 check_company_infos.py 空 mask 问题
+
+首次执行严格检查：
+
+```bash
+cd /workspace/OpenPCDet && python tools/company_nuscenes/check_company_infos.py --cfg_file tools/cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml --strict
+```
+
+报错：
+
+```text
+IndexError: arrays used as indices must be of integer (or boolean) type
+```
+
+定位原因：
+
+```text
+check_company_infos.py 中 retained_mask 在某些样本为空时会变成 float 类型空数组，
+导致 names[retained_mask] 不能索引。
+```
+
+实际补丁：
+
+```bash
+cd /workspace/OpenPCDet && python -c "from pathlib import Path; p=Path('tools/company_nuscenes/check_company_infos.py'); lines=p.read_text().splitlines(); out=[]; inserted=False; prev=''; target='retained_names = names[retained_mask]'; insert='retained_mask = np.asarray(retained_mask, dtype=bool)';  [out.append(line) or (out.insert(len(out)-1, line[:len(line)-len(line.lstrip())]+insert) if target in line and insert not in prev else None) for line in lines for prev in [out[-1] if out else '']]; p.write_text('\n'.join(out)+'\n'); print('patched');" && grep -n -C 3 "retained_names = names\\[retained_mask\\]" tools/company_nuscenes/check_company_infos.py
+```
+
+补丁后关键代码为：
+
+```text
+retained_mask = np.asarray(retained_mask, dtype=bool)
+retained_names = names[retained_mask]
+```
+
+注意：
+
+```text
+由于 /workspace/OpenPCDet 是宿主机 /home/ubuntu/WXY/OpenPCDet_ljl_plus 挂载进来的，
+该补丁已经实际写入宿主机代码目录。
+后续建议提交回 GitHub，否则重新 clone 后仍会遇到同样问题。
+```
+
+### 22.9 check_company_infos.py 严格检查通过
+
+补丁后重新执行：
+
+```bash
+cd /workspace/OpenPCDet && python tools/company_nuscenes/check_company_infos.py --cfg_file tools/cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml --strict
+```
+
+实际通过结果摘要：
+
+```text
+company_nuscenes_infos_train.pkl
+  samples: 53645
+  empty_gt_samples: 4307
+  empty_gt_after_min_points_1: 4324
+  invalid_num_lidar_pts_samples: 0
+  boxes_with_unknown_lidar_pts_kept: 0
+  missing_lidar_paths: 0
+  classes: 25
+  retained_boxes_min_points_1: 2071359
+
+company_nuscenes_infos_val.pkl
+  samples: 13511
+  empty_gt_samples: 1475
+  empty_gt_after_min_points_1: 1478
+  invalid_num_lidar_pts_samples: 0
+  boxes_with_unknown_lidar_pts_kept: 0
+  missing_lidar_paths: 0
+  classes: 25
+  retained_boxes_min_points_1: 500401
+
+Class-name check
+  outside_config: []
+  absent_from_infos: ['vehicle_bus_bendy']
+  annotated_but_absent_from_train: []
+  annotated_but_absent_from_val: []
+  annotated_but_unlearnable_after_train_filter: []
+```
+
+关键结论：
+
+```text
+missing_lidar_paths = 0，说明点云路径闭环；
+outside_config = []，说明 info 里的类别都在配置中；
+invalid_num_lidar_pts_samples = 0，说明 num_lidar_pts 字段没有异常；
+absent_from_infos 只有 vehicle_bus_bendy，说明该类在当前 T23 数据里没有样本，但不影响代码继续跑通。
+```
+
+### 22.10 修复 pcdet.version 缺失问题
+
+执行 dataloader smoke test 时首次报错：
+
+```text
+ModuleNotFoundError: No module named 'pcdet.version'
+```
+
+原因：
+
+```text
+pcdet/__init__.py 中引用了 from .version import __version__，
+但当前代码目录缺少 pcdet/version.py。
+```
+
+实际修复：
+
+```bash
+cd /workspace/OpenPCDet && printf "__version__ = 'company-26cls-plus'\n" > pcdet/version.py && cat pcdet/version.py && python -c "import pcdet; print('pcdet version:', pcdet.__version__)"
+```
+
+实际输出：
+
+```text
+__version__ = 'company-26cls-plus'
+pcdet version: company-26cls-plus+pye016ced
+```
+
+注意：
+
+```text
+这个 pcdet/version.py 同样写入了宿主机代码目录；
+后续建议提交回 GitHub。
+```
+
+### 22.11 重新编译 OpenPCDet CUDA/C++ 扩展
+
+继续执行 dataloader smoke test 后报错：
+
+```text
+ImportError: cannot import name 'roiaware_pool3d_cuda' from 'pcdet.ops.roiaware_pool3d'
+```
+
+原因：
+
+```text
+新代码覆盖到 /workspace/OpenPCDet 后，原镜像中旧代码编译好的 CUDA/C++ 扩展不再对应当前挂载代码目录；
+因此需要在容器里重新执行 setup.py develop。
+```
+
+执行：
+
+```bash
+cd /workspace/OpenPCDet && rm -rf build pcdet.egg-info && python setup.py develop
+```
+
+实际编译完成，最后输出：
+
+```text
+Finished processing dependencies for pcdet==0.6.0+e016ced
+```
+
+### 22.12 修复 libc10.so 动态库路径问题
+
+编译完成后验证 roiaware 扩展时报错：
+
+```text
+ImportError: libc10.so: cannot open shared object file: No such file or directory
+```
+
+原因：
+
+```text
+OpenPCDet CUDA 扩展已经编译出来，但运行时找不到 PyTorch 的动态库路径；
+需要把 torch/lib 加到 LD_LIBRARY_PATH。
+```
+
+临时修复命令：
+
+```bash
+cd /workspace/OpenPCDet && export TORCH_LIB=$(python -c "import torch, os; print(os.path.join(os.path.dirname(torch.__file__), 'lib'))") && export LD_LIBRARY_PATH=$TORCH_LIB:$LD_LIBRARY_PATH && python -c "from pcdet.ops.roiaware_pool3d import roiaware_pool3d_cuda; print('roiaware ok')"
+```
+
+后续为了每次进入容器自动生效，已写入 root 用户的 `~/.bashrc`：
+
+```bash
+echo 'export TORCH_LIB=$(python -c "import torch, os; print(os.path.join(os.path.dirname(torch.__file__), '\''lib'\''))")' >> ~/.bashrc && echo 'export LD_LIBRARY_PATH=$TORCH_LIB:$LD_LIBRARY_PATH' >> ~/.bashrc && source ~/.bashrc
+```
+
+说明：
+
+```text
+该设置目前只对 detection3d_v5_plus 容器内 root 用户环境生效；
+如果以后重建容器，需要重新设置，或固化到镜像/Dockerfile/启动脚本中。
+```
+
+### 22.13 dataloader smoke test 已通过
+
+最终执行：
+
+```bash
+cd /workspace/OpenPCDet && export TORCH_LIB=$(python -c "import torch, os; print(os.path.join(os.path.dirname(torch.__file__), 'lib'))") && export LD_LIBRARY_PATH=$TORCH_LIB:$LD_LIBRARY_PATH && python tools/company_nuscenes/smoke_test_company_dataloader.py --cfg_file tools/cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml
+```
+
+实际输出：
+
+```text
+2026-06-22 06:18:45,302   INFO  Loading CompanyNuScenes dataset
+2026-06-22 06:18:47,814   INFO  Total samples for CompanyNuScenes dataset: 53645
+dataset_len: 53645
+batch_keys: ['batch_size', 'flip_x', 'flip_y', 'frame_id', 'gt_boxes', 'metadata', 'noise_rot', 'noise_scale', 'points', 'use_lead_xyz', 'voxel_coords', 'voxel_num_points', 'voxels']
+points_shape: (235217, 5)
+gt_boxes_shape: (1, 31, 8)
+first_gt_box: [-5.25968599319458, -37.36267852783203, -0.6243619918823242, 4.958982467651367, 2.1436831951141357, 1.6151323318481445, -2.8265366554260254, 6.0]
+```
+
+结论：
+
+```text
+CompanyNuScenesDataset 可以正常加载；
+train infos 可以正常读取；
+PCD 点云可以正常读取；
+voxelization 已经跑通；
+gt_boxes 格式正常；
+dataloader 层面已经通过。
+```
+
+### 22.14 当前代码目录中已经发生的本地修改
+
+因为容器内 `/workspace/OpenPCDet` 是宿主机代码目录挂载，所以本次修复已经修改了宿主机：
+
+```text
+/home/ubuntu/WXY/OpenPCDet_ljl_plus
+```
+
+已知修改包括：
+
+```text
+1. tools/company_nuscenes/check_company_infos.py
+   - 在 retained_names = names[retained_mask] 前增加 retained_mask = np.asarray(retained_mask, dtype=bool)
+
+2. pcdet/version.py
+   - 新增 __version__ = 'company-26cls-plus'
+
+3. 可能生成/更新的编译产物和 egg-info
+   - build/
+   - pcdet.egg-info/
+   - 若干 .so 文件
+```
+
+建议在提交 GitHub 前执行：
+
+```bash
+cd /home/ubuntu/WXY/OpenPCDet_ljl_plus
+git status --short
+```
+
+然后只提交源码层面的必要修改：
+
+```text
+tools/company_nuscenes/check_company_infos.py
+pcdet/version.py
+```
+
+不建议提交：
+
+```text
+build/
+pcdet.egg-info/
+*.so
+__pycache__/
+```
+
+### 22.15 当前下一步建议
+
+当前已经完成到：
+
+```text
+create infos -> check infos -> dataloader smoke
+```
+
+下一步继续：
+
+```bash
+nvidia-smi
+```
+
+选择空闲 GPU 后，执行 VoxelNeXt 单 batch 前向/反向测试：
+
+```bash
+cd /workspace/OpenPCDet && CUDA_VISIBLE_DEVICES=1 python tools/company_nuscenes/smoke_test_formal_voxelnext.py --cfg_file tools/cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml --workers 0
+```
+
+如果 GPU 1 忙，则改用 GPU 0：
+
+```bash
+cd /workspace/OpenPCDet && CUDA_VISIBLE_DEVICES=0 python tools/company_nuscenes/smoke_test_formal_voxelnext.py --cfg_file tools/cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml --workers 0
+```
+
+如果又遇到动态库路径问题，可使用带 `LD_LIBRARY_PATH` 的一行命令：
+
+```bash
+cd /workspace/OpenPCDet && export TORCH_LIB=$(python -c "import torch, os; print(os.path.join(os.path.dirname(torch.__file__), 'lib'))") && export LD_LIBRARY_PATH=$TORCH_LIB:$LD_LIBRARY_PATH && CUDA_VISIBLE_DEVICES=1 python tools/company_nuscenes/smoke_test_formal_voxelnext.py --cfg_file tools/cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml --workers 0
+```
+
+若 VoxelNeXt smoke test 通过，再启动最小训练：
+
+```bash
+cd /workspace/OpenPCDet/tools
+
+CUDA_VISIBLE_DEVICES=1 python train.py \
+  --cfg_file cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml \
+  --batch_size 1 \
+  --workers 4 \
+  --extra_tag t23_2026_26cls_smoke
+```
+
+### 22.16 当前阶段一句话结论
+
+```text
+截至当前进度，OpenPCDet_ljl_plus 新代码已经成功覆盖到服务器，detection3d_v5_plus 已重建，T23 数据集已挂载并完成 infos 生成与严格检查，dataloader smoke test 已经通过。当前问题不在数据路径或 Dataset 读取层面，下一步应验证 VoxelNeXt 模型前向/反向和最小训练。
+```
