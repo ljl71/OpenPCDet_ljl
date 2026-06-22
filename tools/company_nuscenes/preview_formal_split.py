@@ -15,8 +15,8 @@ def load_utils(repo_root):
 def main():
     repo_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description='Preview the formal scene-level train/val split without writing files.')
-    parser.add_argument('--data_path', type=Path, default=repo_root / 'data' / 'nuscenes')
-    parser.add_argument('--version', type=str, default='v1.0-trainval')
+    parser.add_argument('--data_path', type=Path, default=repo_root / 'data' / 'NuScenes-develop_t23_2026')
+    parser.add_argument('--version', type=str, default='v1.0-develop')
     parser.add_argument('--train_ratio', type=float, default=0.8)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--min_lidar_points', type=int, default=1)

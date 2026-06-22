@@ -142,7 +142,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--result", required=True)
     parser.add_argument("--infos", required=True)
-    parser.add_argument("--data_root", default="data/nuscenes")
+    parser.add_argument("--data_root", default="data/NuScenes-develop_t23_2026")
     parser.add_argument("--out_dir", required=True)
     parser.add_argument("--score_thresh", type=float, default=0.2)
     parser.add_argument("--num", type=int, default=20)

@@ -68,6 +68,7 @@ COMPANY_RAW_CLASS_NAMES = [
 ]
 
 COMPANY_26_CLASS_NAMES = [COMPANY_NAME_MAPPING[name] for name in COMPANY_RAW_CLASS_NAMES]
+LIDAR_CHANNEL_CANDIDATES = ('LIDAR_TOP', 'lidar_fusion', 'aps/sensors/lidar/main')
 
 
 def annotation_point_count(annotation, key='num_lidar_pts'):
@@ -279,6 +280,7 @@ def load_company_tables(root_path):
     calibrated_sensors = {x['token']: x for x in load_json(root_path / 'calibrated_sensor.json')}
     ego_poses = {x['token']: x for x in load_json(root_path / 'ego_pose.json')}
     sample_data = {x['token']: x for x in load_json(root_path / 'sample_data.json')}
+    sensors = {x['token']: x for x in load_json(root_path / 'sensor.json')}
     scenes = {x['token']: x for x in load_json(root_path / 'scene.json')}
     samples = load_json(root_path / 'sample.json')
     annotations = load_json(root_path / 'sample_annotation.json')
@@ -287,12 +289,22 @@ def load_company_tables(root_path):
     for anno in annotations:
         annos_by_sample[anno['sample_token']].append(anno)
 
+    sample_data_by_sample = defaultdict(dict)
+    for token, sample_data_item in sample_data.items():
+        calibrated_sensor = calibrated_sensors.get(sample_data_item.get('calibrated_sensor_token'), {})
+        sensor = sensors.get(calibrated_sensor.get('sensor_token'), {})
+        channel = sensor.get('channel')
+        if channel:
+            sample_data_by_sample[sample_data_item['sample_token']][channel] = token
+
     return {
         'categories': categories,
         'instances': instances,
         'calibrated_sensors': calibrated_sensors,
         'ego_poses': ego_poses,
         'sample_data': sample_data,
+        'sample_data_by_sample': sample_data_by_sample,
+        'sensors': sensors,
         'scenes': scenes,
         'samples': samples,
         'annos_by_sample': annos_by_sample,
@@ -305,13 +317,25 @@ def raw_category_for_annotation(annotation, tables):
     return category['name']
 
 
+def get_lidar_sample_data_token(sample, tables):
+    sample_data_map = sample.get('data') or tables.get('sample_data_by_sample', {}).get(sample['token'], {})
+    for channel in LIDAR_CHANNEL_CANDIDATES:
+        if channel in sample_data_map:
+            return sample_data_map[channel]
+    available = sorted(sample_data_map)
+    raise KeyError(
+        f'Cannot find lidar sample_data for sample {sample["token"]}; '
+        f'checked {list(LIDAR_CHANNEL_CANDIDATES)}, available channels={available}'
+    )
+
+
 def build_sample_info(sample, tables, root_path, data_path=None, max_sweeps=1):
     if max_sweeps != 1:
         raise NotImplementedError('CompanyNuScenes first-stage adapter supports MAX_SWEEPS=1 only.')
 
     root_path = Path(root_path)
     data_path = Path(data_path) if data_path is not None else root_path
-    lidar_token = sample['data']['LIDAR_TOP']
+    lidar_token = get_lidar_sample_data_token(sample, tables)
     lidar_sd = tables['sample_data'][lidar_token]
     lidar_path = resolve_lidar_path(root_path, lidar_sd['filename'], data_path=data_path)
 

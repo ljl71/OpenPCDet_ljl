@@ -3,6 +3,8 @@ import json
 import pickle
 from pathlib import Path
 
+import numpy as np
+
 from ..dataset import DatasetTemplate
 from . import company_nuscenes_eval
 from . import company_nuscenes_utils
@@ -19,6 +21,7 @@ class CompanyNuScenesDataset(DatasetTemplate):
         self.infos = []
         self.point_dim = len(point_io.get_src_feature_list(self.dataset_cfg))
         self.lidar_point_dim = point_io.get_lidar_point_dim(self.dataset_cfg, default=self.point_dim)
+        self._warned_missing_num_lidar_pts = False
         self.include_company_nuscenes_data(self.mode)
 
     def _log(self, msg):
@@ -28,7 +31,9 @@ class CompanyNuScenesDataset(DatasetTemplate):
     def include_company_nuscenes_data(self, mode):
         self._log('Loading CompanyNuScenes dataset')
         company_infos = []
-        for info_path in self.dataset_cfg.INFO_PATH[mode]:
+        split_name = self.dataset_cfg.get('DATA_SPLIT', {}).get(mode, mode)
+        info_mode = split_name if split_name in self.dataset_cfg.INFO_PATH else mode
+        for info_path in self.dataset_cfg.INFO_PATH[info_mode]:
             info_path = self.metadata_path / info_path
             if not info_path.exists():
                 self._log(f'Missing info file: {info_path}')
@@ -43,7 +48,8 @@ class CompanyNuScenesDataset(DatasetTemplate):
         if lidar_path.is_absolute():
             candidates = [lidar_path]
         else:
-            candidates = [self.data_path / lidar_path, self.metadata_path / lidar_path]
+            candidates = [self.data_path / lidar_path, self.metadata_path / lidar_path, lidar_path]
+        candidates.extend(self._suffix_lidar_candidates(lidar_path))
 
         resolved_path = None
         for candidate in candidates:
@@ -66,11 +72,36 @@ class CompanyNuScenesDataset(DatasetTemplate):
             lidar_path, self.dataset_cfg, fallback_dim=self.lidar_point_dim
         )
 
+    def _suffix_lidar_candidates(self, lidar_path):
+        candidates = []
+        parts = lidar_path.parts
+        for marker in ('samples', 'sweeps'):
+            if marker not in parts:
+                continue
+            rel_path = Path(*parts[parts.index(marker):])
+            candidates.extend([self.data_path / rel_path, self.metadata_path / rel_path])
+        return candidates
+
     def get_lidar_with_sweeps(self, index, max_sweeps=1):
         if max_sweeps != 1:
             raise NotImplementedError('CompanyNuScenesDataset currently supports MAX_SWEEPS=1 only.')
         info = self.infos[index]
         return self.read_lidar(info['lidar_path'])
+
+    @staticmethod
+    def append_zero_velocity(gt_boxes):
+        """Single-frame company data has no measured velocity; zeros only keep FSHNet's vel head shape-compatible."""
+        gt_boxes = np.asarray(gt_boxes, dtype=np.float32)
+        if gt_boxes.size == 0:
+            return gt_boxes.reshape(-1, 9)
+        if gt_boxes.shape[1] == 9:
+            return gt_boxes
+        if gt_boxes.shape[1] != 7:
+            raise ValueError(
+                f'Expected company gt_boxes to have 7 lidar box dims or 9 dims with velocity, got {gt_boxes.shape}'
+            )
+        zeros = np.zeros((gt_boxes.shape[0], 2), dtype=gt_boxes.dtype)
+        return np.concatenate([gt_boxes[:, :7], zeros], axis=1)
 
     def __len__(self):
         if self._merge_all_iters_to_one_epoch:
@@ -92,10 +123,20 @@ class CompanyNuScenesDataset(DatasetTemplate):
         if 'gt_boxes' in info:
             if self.dataset_cfg.get('FILTER_MIN_POINTS_IN_GT', False):
                 min_points = self.dataset_cfg.FILTER_MIN_POINTS_IN_GT
-                mask = [
-                    count is None or count >= min_points
-                    for count in info['num_lidar_pts']
-                ]
+                point_counts = info.get('num_lidar_pts')
+                if point_counts is None:
+                    if not self._warned_missing_num_lidar_pts:
+                        self._log(
+                            'num_lidar_pts is missing from info records; '
+                            'FILTER_MIN_POINTS_IN_GT will be skipped for these records.'
+                        )
+                        self._warned_missing_num_lidar_pts = True
+                    mask = None
+                else:
+                    mask = [
+                        count is None or count >= min_points
+                        for count in point_counts
+                    ]
             else:
                 mask = None
             input_dict.update({
@@ -103,9 +144,16 @@ class CompanyNuScenesDataset(DatasetTemplate):
                 'gt_boxes': info['gt_boxes'] if mask is None else info['gt_boxes'][mask],
             })
 
+            if self.dataset_cfg.get('ZERO_VELOCITY_FOR_FSHNET', False):
+                input_dict['gt_boxes'] = self.append_zero_velocity(input_dict['gt_boxes'])
+
         data_dict = self.prepare_data(data_dict=input_dict)
 
-        if not self.dataset_cfg.get('PRED_VELOCITY', False) and 'gt_boxes' in data_dict:
+        if (
+            not self.dataset_cfg.get('PRED_VELOCITY', False)
+            and not self.dataset_cfg.get('ZERO_VELOCITY_FOR_FSHNET', False)
+            and 'gt_boxes' in data_dict
+        ):
             data_dict['gt_boxes'] = data_dict['gt_boxes'][:, [0, 1, 2, 3, 4, 5, 6, -1]]
         return data_dict
 
@@ -166,7 +214,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Company nuScenes data prep')
     parser.add_argument('--cfg_file', type=str, required=True)
     parser.add_argument('--func', type=str, default='create_company_nuscenes_infos')
-    parser.add_argument('--version', type=str, default='v1.0-trainval')
+    parser.add_argument('--version', type=str, default='v1.0-develop')
     args = parser.parse_args()
 
     dataset_cfg = EasyDict(yaml.safe_load(open(args.cfg_file)))
@@ -176,8 +224,8 @@ if __name__ == '__main__':
     if args.func == 'create_company_nuscenes_infos':
         create_company_nuscenes_infos(
             dataset_cfg=dataset_cfg,
-            data_path=root_dir / 'data' / 'nuscenes',
-            save_path=root_dir / 'data' / 'nuscenes',
+            data_path=root_dir / 'data' / 'NuScenes-develop_t23_2026',
+            save_path=root_dir / 'data' / 'NuScenes-develop_t23_2026',
             version=args.version,
         )
     else:

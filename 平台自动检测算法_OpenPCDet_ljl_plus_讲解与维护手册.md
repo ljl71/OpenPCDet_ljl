@@ -1284,3 +1284,352 @@ AI标注按钮在当前测试任务中已经能走 detection3d_plus；
 4. OpenPCDet_ljl 26 类 VoxelNeXt runbook；
 5. 平台实际测试日志、curl 输出、MongoDB 查询结果。
 ```
+
+---
+
+## 21. 2026-06-22 最新交接补充：T23 数据集与 plus 容器现状
+
+本节是给后续接手同事看的最新状态说明。前面章节记录的是 2026-05 前后已经打通过的 plus 支路；截至 2026-06-22 再次排查时，服务器当前状态已经发生变化：plus 容器不在了，但镜像还在，T23 新数据集已经放到新的宿主机目录。
+
+### 21.1 当前服务器实际状态
+
+当前在服务器执行：
+
+```bash
+sudo docker ps -a | grep -E "detection3d_v5_plus|detection3d_v5|detection3d"
+```
+
+实际只看到：
+
+```text
+detection3d
+```
+
+没有看到：
+
+```text
+detection3d_v5_plus
+detection3d_v5
+```
+
+因此结论是：
+
+```text
+1. detection3d_v5_plus 不是单纯没启动，而是 docker ps -a 里也不存在；
+2. 当前服务器仍保留供应商原 3D 检测容器 detection3d；
+3. 文档前面记录的 plus 支路如果仍指向 detection3d_v5_plus，目前会断；
+4. 需要先重建 detection3d_v5_plus 容器，再启动 plus FastAPI。
+```
+
+镜像检查结果：
+
+```bash
+sudo docker images | grep -E "pcdet_back_3dv2|pcdet|detection"
+```
+
+确认还存在：
+
+```text
+pcdet_back_3dv2:20260520
+```
+
+这正是旧 runbook 中用于 plus 容器的镜像，所以目前不需要重新 build 镜像，优先按下面步骤重建容器。
+
+### 21.2 T23 新数据集位置
+
+当前 T23 新数据集在宿主机：
+
+```text
+/home/ubuntu/WXY/data_ljl/NuScenes-develop_t23_2026
+/home/ubuntu/WXY/data_ljl/NuScenes-develop_t23_2026.tar
+```
+
+用户实际检查结果：
+
+```bash
+cd ~/WXY/data_ljl
+ls
+```
+
+输出：
+
+```text
+NuScenes-develop_t23_2026  NuScenes-develop_t23_2026.tar
+```
+
+新代码中的 OpenPCDet_ljl_plus 配置默认从 `tools/` 目录启动训练，并读取：
+
+```text
+../data/NuScenes-develop_t23_2026
+```
+
+容器内等价路径应为：
+
+```text
+/workspace/OpenPCDet/data/NuScenes-develop_t23_2026
+```
+
+所以重建容器时，推荐把宿主机的新数据集目录直接挂载到这个容器内路径。
+
+### 21.3 重建 detection3d_v5_plus 容器
+
+先确认宿主机项目和数据目录存在：
+
+```bash
+ls -ld /home/ubuntu/WXY/OpenPCDet_ljl_plus
+ls -ld /home/ubuntu/WXY/data_ljl/NuScenes-develop_t23_2026
+```
+
+推荐重建命令：
+
+```bash
+sudo docker run -it -d --gpus all --name detection3d_v5_plus \
+  -v /home/ubuntu/WXY/OpenPCDet_ljl_plus:/workspace/OpenPCDet \
+  -v /home/ubuntu/WXY/data_ljl/NuScenes-develop_t23_2026:/workspace/OpenPCDet/data/NuScenes-develop_t23_2026 \
+  pcdet_back_3dv2:20260520 /bin/bash
+```
+
+说明：
+
+```text
+1. /home/ubuntu/WXY/OpenPCDet_ljl_plus 挂载为 /workspace/OpenPCDet；
+2. T23 数据集挂载为 /workspace/OpenPCDet/data/NuScenes-develop_t23_2026；
+3. 这样不用改训练配置中的 DATA_PATH；
+4. 如果后续还需要旧 /home/ubuntu/WXY/data 里的其他数据，不要覆盖上述 T23 挂载，可以另行增加非冲突挂载或用软链接处理。
+```
+
+进入容器：
+
+```bash
+sudo docker exec -u root -it detection3d_v5_plus /bin/bash
+cd /workspace/OpenPCDet
+```
+
+检查数据在容器内是否可见：
+
+```bash
+ls -ld data/NuScenes-develop_t23_2026
+ls data/NuScenes-develop_t23_2026/v1.0-develop | head
+ls data/NuScenes-develop_t23_2026/samples | head
+```
+
+### 21.4 网络与 ai-nginx 必须重新确认
+
+旧文档中 plus 支路依赖：
+
+```text
+main-server -> ai-nginx /smart-tool/detection3d_plus -> detection3d_v5_plus
+```
+
+重建容器后不要假设网络仍然正确，必须检查：
+
+```bash
+sudo docker inspect ai-nginx --format '{{json .NetworkSettings.Networks}}'
+sudo docker inspect detection3d --format '{{json .NetworkSettings.Networks}}'
+sudo docker inspect detection3d_v5_plus --format '{{json .NetworkSettings.Networks}}'
+```
+
+再检查 ai-nginx 现在怎么转发 plus：
+
+```bash
+sudo docker exec ai-nginx sh -lc 'grep -n "detection3d_plus\|detection3d" /etc/nginx/nginx.conf'
+```
+
+如果 `detection3d_v5_plus` 不在 ai-nginx 可访问的网络里，先找网络名：
+
+```bash
+sudo docker network ls
+```
+
+如果现场仍使用旧文档提到的 `mooredata_my-network`，则接入：
+
+```bash
+sudo docker network connect mooredata_my-network detection3d_v5_plus
+```
+
+如果 ai-nginx 配置中写死的是旧 IP，重建容器后 IP 可能变了，需要重新检查并调整 nginx：
+
+```bash
+sudo docker inspect detection3d_v5_plus --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+```
+
+调整后执行：
+
+```bash
+sudo docker exec ai-nginx nginx -t
+sudo docker exec ai-nginx nginx -s reload
+```
+
+### 21.5 生成 T23 26 类 infos
+
+进入容器后，从仓库根目录执行：
+
+```bash
+cd /workspace/OpenPCDet
+
+python tools/company_nuscenes/create_company_infos.py \
+  --data_path data/NuScenes-develop_t23_2026 \
+  --save_path data/NuScenes-develop_t23_2026 \
+  --version v1.0-develop \
+  --max_sweeps 1 \
+  --min_lidar_points 1
+```
+
+应生成：
+
+```text
+/workspace/OpenPCDet/data/NuScenes-develop_t23_2026/v1.0-develop/company_nuscenes_infos_train.pkl
+/workspace/OpenPCDet/data/NuScenes-develop_t23_2026/v1.0-develop/company_nuscenes_infos_val.pkl
+```
+
+严格检查：
+
+```bash
+python tools/company_nuscenes/check_company_infos.py \
+  --cfg_file tools/cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml \
+  --strict
+```
+
+### 21.6 数据加载与训练 smoke test
+
+先检查 dataloader：
+
+```bash
+python tools/company_nuscenes/smoke_test_company_dataloader.py \
+  --cfg_file tools/cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml
+```
+
+再做一次 VoxelNeXt 单 batch 前向和反向：
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python tools/company_nuscenes/smoke_test_formal_voxelnext.py \
+  --cfg_file tools/cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml \
+  --workers 0
+```
+
+如果 GPU 1 不可用，先用：
+
+```bash
+nvidia-smi
+```
+
+确认空闲 GPU 后替换 `CUDA_VISIBLE_DEVICES`。
+
+### 21.7 T23 26 类训练命令
+
+从 `tools/` 目录启动训练：
+
+```bash
+cd /workspace/OpenPCDet/tools
+
+CUDA_VISIBLE_DEVICES=1 python train.py \
+  --cfg_file cfgs/nuscenes_models/company_voxelnext_26cls_trainval.yaml \
+  --batch_size 1 \
+  --workers 4 \
+  --extra_tag t23_2026_26cls
+```
+
+说明：
+
+```text
+1. 第一次用新 T23 数据集建议 batch_size=1 先跑通；
+2. 跑通后再根据显存改为 batch_size=8 或其他值；
+3. 当前适配仍保持原 26 类，不做 10 类合并；
+4. 当前数据集 VERSION 为 v1.0-develop；
+5. 当前点云读取 PCD，字段为 x, y, z, intensity。
+```
+
+### 21.8 重新启动 plus FastAPI
+
+训练得到 checkpoint 后，部署仍沿用前面第 7 节思路：把 checkpoint 和 yaml 放到 `company_test/current` 或一个新的测试目录，并保证模型 yaml 里的 `_BASE_CONFIG_` 使用绝对路径。
+
+推荐目录：
+
+```text
+/workspace/OpenPCDet/company_test/current/
+    checkpoint.pth
+    model.yaml
+    dataset.yaml
+```
+
+`model.yaml` 中应写：
+
+```yaml
+DATA_CONFIG:
+    _BASE_CONFIG_: /workspace/OpenPCDet/company_test/current/dataset.yaml
+```
+
+然后确认 `/workspace/OpenPCDet/tools/inference/inference_nms.py` 中的默认路径指向 current：
+
+```text
+DEFAULT_CKPT_PATH = /workspace/OpenPCDet/company_test/current/checkpoint.pth
+DEFAULT_CFG_FILE = /workspace/OpenPCDet/company_test/current/model.yaml
+```
+
+启动 plus API：
+
+```bash
+cd /workspace/OpenPCDet
+
+PYTHONPATH=/workspace/OpenPCDet:/workspace/OpenPCDet/tools/inference \
+CUDA_VISIBLE_DEVICES=1 \
+/opt/conda/bin/python -m uvicorn tools.inference.fastAPI:app \
+  --host 0.0.0.0 \
+  --port 8000
+```
+
+成功标志：
+
+```text
+Application startup complete.
+Uvicorn running on http://0.0.0.0:8000
+```
+
+### 21.9 重建后验证 plus 支路
+
+检查容器：
+
+```bash
+sudo docker ps | grep -E "detection3d|ai-nginx|main-server|project-server-v6|molar-label"
+```
+
+检查 plus API 是否活着：
+
+```bash
+curl -I http://172.28.0.1:8000/docs
+```
+
+如果 ai-nginx 不是转到 `172.28.0.1:8000`，以 nginx 配置里的 `proxy_pass` 为准。
+
+检查 ai-nginx：
+
+```bash
+sudo docker exec ai-nginx sh -lc 'grep -n "detection3d_plus\|detection3d" /etc/nginx/nginx.conf'
+sudo docker logs -f --tail 0 ai-nginx 2>&1 | grep --line-buffered -E "detection3d_plus|detection3d|smart-tool"
+```
+
+检查 main-server 是否仍保留测试 taskId 分流：
+
+```bash
+sudo docker exec main-server sh -lc "sed -n '39246,39260p' /code/dist/main/main.js"
+```
+
+重点看是否仍有类似逻辑：
+
+```js
+taskId === '69fe8f840fa06ee86bde27a6'
+    ? '/smart-tool/detection3d_plus'
+    : '/smart-tool/detection3d'
+```
+
+### 21.10 给接手人的一句话结论
+
+```text
+截至 2026-06-22：
+旧文档中记录的 detection3d_v5_plus 容器当前已经不存在；
+pcdet_back_3dv2:20260520 镜像仍存在；
+T23 数据集位于 /home/ubuntu/WXY/data_ljl/NuScenes-develop_t23_2026；
+OpenPCDet_ljl_plus 代码已按 T23 v1.0-develop、PCD 点云、原 26 类完成适配；
+接手人需要先重建 detection3d_v5_plus，并把 T23 数据挂载到 /workspace/OpenPCDet/data/NuScenes-develop_t23_2026；
+之后按 create infos -> check infos -> dataloader smoke -> VoxelNeXt smoke -> train -> 部署 FastAPI 的顺序恢复 plus 支路。
+```
