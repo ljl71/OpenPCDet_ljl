@@ -111,7 +111,7 @@ def check_info_file(root, data_root, info_name, min_lidar_points):
         else:
             retained_mask = np.asarray([
                 count is None or count >= min_lidar_points for count in point_counts
-            ])
+            ], dtype=bool)
             boxes_with_unknown_lidar_pts += sum(count is None for count in point_counts)
             retained_names = names[retained_mask]
         retained_counter.update(retained_names)
